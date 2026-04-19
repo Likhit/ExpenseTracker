@@ -1,2 +1,39 @@
 Plan.md
 Goal.md
+
+# Nix
+result
+result-*
+
+# direnv
+.direnv/
+
+# Flutter/Dart
+.dart_tool/
+.packages
+.pub/
+build/
+*.iml
+*.ipr
+*.iws
+.idea/
+.vscode/
+
+# Generated files
+*.g.dart
+*.freezed.dart
+
+# Pub cache
+.pub-cache/
+
+# Android
+android/.gradle/
+android/local.properties
+android/key.properties
+android/*.keystore
+android/app/debug/
+android/app/profile/
+android/app/release/
+
+# Coverage
+coverage/
