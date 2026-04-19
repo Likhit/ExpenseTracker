@@ -12,6 +12,12 @@ Cross-platform (Android, Linux) double-entry bookkeeping app for personal financ
 
 NixOS-based. The project is a Nix flake with direnv (`.envrc` → `use flake`). Entering the project directory auto-loads the dev shell with Flutter SDK, Dart, and Linux build dependencies.
 
+### Workflow
+After completing each implementation phase:
+1. Run `flutter test` and `flutter analyze`
+2. Create a commit
+3. Send a PR
+
 ### Commands
 - `flutter run -d linux` — run Linux desktop app
 - `flutter build linux` — release build
