@@ -42,6 +42,7 @@
           libepoxy
           xorg.libX11
           libGL
+          sysprof
         ];
 
         # Runtime deps needed by the built Flutter Linux app
@@ -52,6 +53,7 @@
           libepoxy
           xorg.libX11
           libGL
+          sysprof
         ];
 
       in
