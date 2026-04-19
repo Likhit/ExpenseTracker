@@ -30,6 +30,13 @@
           system-images-android-34-google-apis-x86-64
         ]);
 
+        # Flutter with flutter_tester execute permission fixed for NixOS
+        flutter = pkgs.flutter.overrideAttrs (old: {
+          postFixup = (old.postFixup or "") + ''
+            find $out -name flutter_tester -type f -exec chmod +x {} \;
+          '';
+        });
+
         # Linux desktop build dependencies for Flutter
         linuxBuildDeps = with pkgs; [
           clang
@@ -59,19 +66,19 @@
       in
       {
         devShells.default = pkgs.mkShell {
-          buildInputs = with pkgs; [
-            # Flutter & Dart
+          buildInputs = [
+            # Flutter & Dart (patched for NixOS flutter_tester permissions)
             flutter
-            dart
+            pkgs.dart
 
             # Android SDK
             androidSdk
-            jdk17
+            pkgs.jdk17
 
             # Linux desktop build deps
           ] ++ linuxBuildDeps ++ [
             # Testing & dev tools
-            lcov  # coverage reports
+            pkgs.lcov  # coverage reports
           ];
 
           shellHook = ''
@@ -90,6 +97,7 @@
 
             # LD_LIBRARY_PATH for runtime
             export LD_LIBRARY_PATH="${pkgs.lib.makeLibraryPath linuxRuntimeDeps}:''${LD_LIBRARY_PATH:-}"
+
           '';
         };
 
