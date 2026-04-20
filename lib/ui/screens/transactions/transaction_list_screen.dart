@@ -4,6 +4,7 @@ import 'package:intl/intl.dart';
 
 import '../../../models/transaction.dart';
 import '../../../models/account.dart';
+import '../../../models/category.dart';
 import '../../../providers/storage_providers.dart';
 import 'transaction_form_screen.dart';
 
@@ -18,6 +19,15 @@ class TransactionListScreen extends ConsumerStatefulWidget {
 class _TransactionListScreenState
     extends ConsumerState<TransactionListScreen> {
   TransactionType? _typeFilter;
+  String? _accountIdFilter;
+  String? _categoryPathFilter;
+  DateTimeRange? _dateRange;
+
+  bool get _hasFilters =>
+      _typeFilter != null ||
+      _accountIdFilter != null ||
+      _categoryPathFilter != null ||
+      _dateRange != null;
 
   @override
   Widget build(BuildContext context) {
@@ -28,20 +38,25 @@ class _TransactionListScreenState
       appBar: AppBar(
         title: const Text('Transactions'),
         actions: [
-          PopupMenuButton<TransactionType?>(
-            icon: const Icon(Icons.filter_list),
-            tooltip: 'Filter by type',
-            onSelected: (v) => setState(() => _typeFilter = v),
-            itemBuilder: (_) => [
-              const PopupMenuItem(value: null, child: Text('All')),
-              const PopupMenuItem(
-                  value: TransactionType.expense, child: Text('Expenses')),
-              const PopupMenuItem(
-                  value: TransactionType.income, child: Text('Income')),
-              const PopupMenuItem(
-                  value: TransactionType.transfer, child: Text('Transfers')),
-            ],
+          IconButton(
+            icon: Badge(
+              isLabelVisible: _hasFilters,
+              child: const Icon(Icons.filter_list),
+            ),
+            tooltip: 'Filters',
+            onPressed: () => _showFilterSheet(context),
           ),
+          if (_hasFilters)
+            IconButton(
+              icon: const Icon(Icons.filter_list_off),
+              tooltip: 'Clear filters',
+              onPressed: () => setState(() {
+                _typeFilter = null;
+                _accountIdFilter = null;
+                _categoryPathFilter = null;
+                _dateRange = null;
+              }),
+            ),
         ],
       ),
       floatingActionButton: FloatingActionButton(
@@ -52,20 +67,17 @@ class _TransactionListScreenState
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (e, _) => Center(child: Text('Error: $e')),
         data: (transactions) {
-          final accounts =
-              accountsAsync.value ?? <Account>[];
-          var filtered = List<Transaction>.of(transactions);
-          if (_typeFilter != null) {
-            filtered = filtered
-                .where((t) => t.type == _typeFilter)
-                .toList();
-          }
-          // Sort by date descending
+          final accounts = accountsAsync.value ?? <Account>[];
+          var filtered = _applyFilters(List<Transaction>.of(transactions));
           filtered.sort((a, b) => b.date.compareTo(a.date));
 
           if (filtered.isEmpty) {
-            return const Center(
-              child: Text('No transactions yet. Tap + to add one.'),
+            return Center(
+              child: Text(
+                _hasFilters
+                    ? 'No transactions match your filters.'
+                    : 'No transactions yet. Tap + to add one.',
+              ),
             );
           }
 
@@ -82,6 +94,142 @@ class _TransactionListScreenState
             },
           );
         },
+      ),
+    );
+  }
+
+  List<Transaction> _applyFilters(List<Transaction> transactions) {
+    var result = transactions;
+
+    if (_typeFilter != null) {
+      result = result.where((t) => t.type == _typeFilter).toList();
+    }
+
+    if (_accountIdFilter != null) {
+      result = result
+          .where((t) => t.legs.any((l) => l.accountId == _accountIdFilter))
+          .toList();
+    }
+
+    if (_categoryPathFilter != null) {
+      result = result
+          .where((t) => t.legs.any((l) =>
+              l.categoryPath != null &&
+              l.categoryPath!.startsWith(_categoryPathFilter!)))
+          .toList();
+    }
+
+    if (_dateRange != null) {
+      result = result.where((t) {
+        final d = t.date;
+        return !d.isBefore(_dateRange!.start) && !d.isAfter(_dateRange!.end);
+      }).toList();
+    }
+
+    return result;
+  }
+
+  void _showFilterSheet(BuildContext context) {
+    final accounts = ref.read(accountsProvider).value ?? <Account>[];
+    final categories = ref.read(categoriesProvider).value ?? <Category>[];
+    final rootCategories = categories.where((c) => c.depth == 1).toList()
+      ..sort((a, b) => a.path.compareTo(b.path));
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      builder: (context) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text('Filters',
+                  style: Theme.of(context).textTheme.titleLarge),
+              const SizedBox(height: 16),
+
+              // Type filter
+              DropdownButtonFormField<TransactionType?>(
+                initialValue: _typeFilter,
+                decoration: const InputDecoration(labelText: 'Type'),
+                items: [
+                  const DropdownMenuItem(value: null, child: Text('All')),
+                  ...TransactionType.values.map((t) => DropdownMenuItem(
+                        value: t,
+                        child: Text(
+                            t.name[0].toUpperCase() + t.name.substring(1)),
+                      )),
+                ],
+                onChanged: (v) => setState(() => _typeFilter = v),
+              ),
+              const SizedBox(height: 12),
+
+              // Account filter
+              DropdownButtonFormField<String?>(
+                initialValue: _accountIdFilter,
+                decoration: const InputDecoration(labelText: 'Account'),
+                items: [
+                  const DropdownMenuItem(value: null, child: Text('All')),
+                  ...accounts.map((a) => DropdownMenuItem(
+                        value: a.id,
+                        child: Text(a.path),
+                      )),
+                ],
+                onChanged: (v) => setState(() => _accountIdFilter = v),
+              ),
+              const SizedBox(height: 12),
+
+              // Category filter
+              DropdownButtonFormField<String?>(
+                initialValue: _categoryPathFilter,
+                decoration: const InputDecoration(labelText: 'Category'),
+                items: [
+                  const DropdownMenuItem(value: null, child: Text('All')),
+                  ...rootCategories.map((c) => DropdownMenuItem(
+                        value: c.path,
+                        child: Text(c.path),
+                      )),
+                ],
+                onChanged: (v) => setState(() => _categoryPathFilter = v),
+              ),
+              const SizedBox(height: 12),
+
+              // Date range
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                title: Text(_dateRange != null
+                    ? '${DateFormat.yMMMd().format(_dateRange!.start)} — ${DateFormat.yMMMd().format(_dateRange!.end)}'
+                    : 'All dates'),
+                leading: const Icon(Icons.date_range),
+                trailing: _dateRange != null
+                    ? IconButton(
+                        icon: const Icon(Icons.clear),
+                        onPressed: () =>
+                            setState(() => _dateRange = null),
+                      )
+                    : null,
+                onTap: () async {
+                  final range = await showDateRangePicker(
+                    context: context,
+                    firstDate: DateTime(2000),
+                    lastDate: DateTime(2100),
+                    initialDateRange: _dateRange,
+                  );
+                  if (range != null) {
+                    setState(() => _dateRange = range);
+                  }
+                },
+              ),
+              const SizedBox(height: 16),
+
+              FilledButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('Apply'),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
