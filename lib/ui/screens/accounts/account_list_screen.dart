@@ -1,3 +1,4 @@
+import 'package:decimal/decimal.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:uuid/uuid.dart';
@@ -94,6 +95,8 @@ class _AccountTile extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final balances = ref.watch(accountBalancesProvider);
+    final accountBalances = balances[account.id] ?? {};
     final typeLabel = account.type.name[0].toUpperCase() +
         account.type.name.substring(1);
 
@@ -103,21 +106,43 @@ class _AccountTile extends ConsumerWidget {
       subtitle: Text(
         [typeLabel, if (account.isVirtual) 'Virtual'].join(' · '),
       ),
-      trailing: PopupMenuButton<String>(
-        onSelected: (action) {
-          if (action == 'edit') {
-            showDialog(
-              context: context,
-              builder: (_) =>
-                  _AccountDialog(existing: account, ref: ref),
-            );
-          } else if (action == 'delete') {
-            ref.read(accountsProvider.notifier).remove(account);
-          }
-        },
-        itemBuilder: (_) => [
-          const PopupMenuItem(value: 'edit', child: Text('Edit')),
-          const PopupMenuItem(value: 'delete', child: Text('Delete')),
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (accountBalances.isNotEmpty)
+            Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: accountBalances.entries.map((e) {
+                final amount = e.value;
+                final isNegative = amount < Decimal.zero;
+                return Text(
+                  '${amount.toStringAsFixed(2)} ${e.key}',
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: isNegative ? Colors.red : Colors.green,
+                  ),
+                );
+              }).toList(),
+            ),
+          PopupMenuButton<String>(
+            onSelected: (action) {
+              if (action == 'edit') {
+                showDialog(
+                  context: context,
+                  builder: (_) =>
+                      _AccountDialog(existing: account, ref: ref),
+                );
+              } else if (action == 'delete') {
+                ref.read(accountsProvider.notifier).remove(account);
+              }
+            },
+            itemBuilder: (_) => [
+              const PopupMenuItem(value: 'edit', child: Text('Edit')),
+              const PopupMenuItem(value: 'delete', child: Text('Delete')),
+            ],
+          ),
         ],
       ),
     );

@@ -272,6 +272,7 @@ class _TransactionFormScreenState
       createdAt: DateTime.now(),
     );
 
+    if (!_validateAndSave(tx)) return;
     await ref.read(transactionsProvider.notifier).add(tx);
     if (mounted) Navigator.pop(context);
   }
@@ -311,6 +312,7 @@ class _TransactionFormScreenState
       createdAt: DateTime.now(),
     );
 
+    if (!_validateAndSave(tx)) return;
     await ref.read(transactionsProvider.notifier).add(tx);
     if (mounted) Navigator.pop(context);
   }
@@ -377,8 +379,19 @@ class _TransactionFormScreenState
       createdAt: DateTime.now(),
     );
 
+    if (!_validateAndSave(tx)) return;
     await ref.read(transactionsProvider.notifier).add(tx);
     if (mounted) Navigator.pop(context);
+  }
+
+  bool _validateAndSave(Transaction tx) {
+    final ledger = ref.read(ledgerServiceProvider);
+    final result = ledger.validate(tx);
+    if (!result.isValid) {
+      _showError(result.errorMessage!);
+      return false;
+    }
+    return true;
   }
 
   void _showError(String message) {

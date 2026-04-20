@@ -1,3 +1,4 @@
+import 'package:decimal/decimal.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:uuid/uuid.dart';
@@ -11,8 +12,20 @@ import '../models/account.dart';
 import '../models/category.dart';
 import '../models/currency.dart';
 import '../models/transaction.dart';
+import '../services/ledger_service.dart';
 
 const _uuid = Uuid();
+
+/// Ledger service provider (singleton).
+final ledgerServiceProvider = Provider<LedgerService>((_) => LedgerService());
+
+/// Computed account balances from all transactions.
+/// Returns accountId -> (currencyCode -> balance).
+final accountBalancesProvider =
+    Provider<Map<String, Map<String, Decimal>>>((ref) {
+  final transactions = ref.watch(transactionsProvider).value ?? [];
+  return ref.watch(ledgerServiceProvider).computeBalances(transactions);
+});
 
 /// The base directory for app data files.
 final dataDirectoryProvider = FutureProvider<Directory>((ref) async {
