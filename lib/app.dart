@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'ui/screens/home/home_screen.dart';
 import 'ui/screens/transactions/transaction_list_screen.dart';
 import 'ui/screens/accounts/account_list_screen.dart';
+import 'ui/screens/categories/category_list_screen.dart';
 import 'ui/screens/settings/settings_screen.dart';
 
 class ExpenseTrackerApp extends StatelessWidget {
@@ -40,6 +41,7 @@ class _AppShellState extends State<AppShell> {
     HomeScreen(),
     TransactionListScreen(),
     AccountListScreen(),
+    CategoryListScreen(),
     SettingsScreen(),
   ];
 
@@ -58,6 +60,11 @@ class _AppShellState extends State<AppShell> {
       icon: Icon(Icons.account_balance_outlined),
       selectedIcon: Icon(Icons.account_balance),
       label: 'Accounts',
+    ),
+    NavigationDestination(
+      icon: Icon(Icons.category_outlined),
+      selectedIcon: Icon(Icons.category),
+      label: 'Categories',
     ),
     NavigationDestination(
       icon: Icon(Icons.settings_outlined),
