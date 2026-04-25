@@ -8,14 +8,9 @@ class CategoryRepository {
       : _store = JsonlStore<Category>(
           filePath: filePath,
           fromJson: Category.fromJson,
-          toJson: (c) => c.toJson(),
-          getId: (c) => c.id,
-          getUpdatedAt: (c) => c.updatedAt,
-          getCreatedAt: (c) => c.createdAt,
         );
 
-  Future<List<Category>> getAll() =>
-      _store.readActive((c) => c.deleted);
+  Future<List<Category>> getAll() => _store.readActive();
 
   Future<void> save(Category category) => _store.append(category);
 

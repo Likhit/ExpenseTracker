@@ -2,12 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../models/category.dart';
+import '../../models/transaction.dart';
 import '../../providers/storage_providers.dart';
 
 /// A widget that shows root categories as chips and allows fuzzy search
 /// for deeper paths. Typing a new `::` path creates the category on the fly.
 class CategoryPicker extends ConsumerStatefulWidget {
-  final CategoryParentType parentType;
+  final TransactionType parentType;
   final String? initialPath;
   final ValueChanged<String> onSelected;
 

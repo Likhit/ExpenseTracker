@@ -1,4 +1,5 @@
 import 'package:freezed_annotation/freezed_annotation.dart';
+import '../data/storage/jsonl_storable.dart';
 import 'leg.dart';
 
 part 'transaction.freezed.dart';
@@ -11,7 +12,7 @@ enum TransactionType {
 }
 
 @freezed
-abstract class Transaction with _$Transaction {
+abstract class Transaction with _$Transaction implements JsonlStorable {
   const factory Transaction({
     required String id,
     required DateTime date,

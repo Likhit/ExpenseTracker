@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:expense_tracker/models/category.dart';
+import 'package:expense_tracker/models/transaction.dart';
 
 void main() {
   group('Category', () {
@@ -10,12 +11,12 @@ void main() {
       final category = Category(
         id: 'cat-1',
         path: 'Food',
-        parentType: CategoryParentType.expense,
+        parentType: TransactionType.expense,
         createdAt: now,
       );
 
       expect(category.path, 'Food');
-      expect(category.parentType, CategoryParentType.expense);
+      expect(category.parentType, TransactionType.expense);
       expect(category.deleted, false);
     });
 
@@ -23,7 +24,7 @@ void main() {
       final category = Category(
         id: 'cat-2',
         path: 'Food::Snacks::Cake',
-        parentType: CategoryParentType.expense,
+        parentType: TransactionType.expense,
         createdAt: now,
       );
 
@@ -37,7 +38,7 @@ void main() {
       final category = Category(
         id: 'cat-1',
         path: 'Salary',
-        parentType: CategoryParentType.income,
+        parentType: TransactionType.income,
         createdAt: now,
       );
 
@@ -50,7 +51,7 @@ void main() {
       final category = Category(
         id: 'cat-1',
         path: 'Food::Groceries',
-        parentType: CategoryParentType.expense,
+        parentType: TransactionType.expense,
         icon: 'restaurant',
         color: '#FF5722',
         createdAt: now,
@@ -66,7 +67,7 @@ void main() {
       final category = Category(
         id: 'cat-1',
         path: 'Health Care::Dental',
-        parentType: CategoryParentType.expense,
+        parentType: TransactionType.expense,
         createdAt: now,
       );
 

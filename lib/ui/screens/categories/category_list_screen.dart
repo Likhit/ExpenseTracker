@@ -4,6 +4,7 @@ import 'package:uuid/uuid.dart';
 import 'package:collection/collection.dart';
 
 import '../../../models/category.dart';
+import '../../../models/transaction.dart';
 import '../../../providers/storage_providers.dart';
 
 class CategoryListScreen extends ConsumerWidget {
@@ -34,10 +35,10 @@ class CategoryListScreen extends ConsumerWidget {
           error: (e, _) => Center(child: Text('Error: $e')),
           data: (categories) {
             final expense = categories
-                .where((c) => c.parentType == CategoryParentType.expense)
+                .where((c) => c.parentType == TransactionType.expense)
                 .toList();
             final income = categories
-                .where((c) => c.parentType == CategoryParentType.income)
+                .where((c) => c.parentType == TransactionType.income)
                 .toList();
 
             return TabBarView(
@@ -152,7 +153,7 @@ class _CategoryDialog extends StatefulWidget {
 
 class _CategoryDialogState extends State<_CategoryDialog> {
   late final TextEditingController _pathController;
-  late CategoryParentType _parentType;
+  late TransactionType _parentType;
 
   @override
   void initState() {
@@ -160,7 +161,7 @@ class _CategoryDialogState extends State<_CategoryDialog> {
     _pathController =
         TextEditingController(text: widget.existing?.path ?? '');
     _parentType =
-        widget.existing?.parentType ?? CategoryParentType.expense;
+        widget.existing?.parentType ?? TransactionType.expense;
   }
 
   @override
@@ -188,10 +189,10 @@ class _CategoryDialogState extends State<_CategoryDialog> {
               autofocus: true,
             ),
             const SizedBox(height: 16),
-            DropdownButtonFormField<CategoryParentType>(
+            DropdownButtonFormField<TransactionType>(
               initialValue: _parentType,
               decoration: const InputDecoration(labelText: 'Type'),
-              items: CategoryParentType.values
+              items: TransactionType.values
                   .map((t) => DropdownMenuItem(
                         value: t,
                         child: Text(

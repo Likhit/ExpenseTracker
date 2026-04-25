@@ -5,7 +5,6 @@ import 'package:decimal/decimal.dart';
 
 import '../../../models/transaction.dart';
 import '../../../models/leg.dart';
-import '../../../models/category.dart';
 import '../../../models/currency.dart';
 import '../../../providers/storage_providers.dart';
 import '../../widgets/category_picker.dart';
@@ -134,8 +133,8 @@ class _TransactionFormScreenState
 
   Widget _buildSimpleFields() {
     final parentType = widget.type == TransactionType.income
-        ? CategoryParentType.income
-        : CategoryParentType.expense;
+        ? TransactionType.income
+        : TransactionType.expense;
 
     return Column(
       children: [
@@ -250,7 +249,7 @@ class _TransactionFormScreenState
     // Ensure category exists (creates if new)
     await ref
         .read(categoriesProvider.notifier)
-        .findOrCreate(_categoryPath!, CategoryParentType.expense);
+        .findOrCreate(_categoryPath!, TransactionType.expense);
 
     final tx = Transaction(
       id: const Uuid().v4(),
@@ -289,7 +288,7 @@ class _TransactionFormScreenState
 
     await ref
         .read(categoriesProvider.notifier)
-        .findOrCreate(_categoryPath!, CategoryParentType.income);
+        .findOrCreate(_categoryPath!, TransactionType.income);
 
     final tx = Transaction(
       id: const Uuid().v4(),

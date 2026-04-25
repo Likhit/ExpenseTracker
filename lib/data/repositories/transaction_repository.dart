@@ -8,14 +8,9 @@ class TransactionRepository {
       : _store = JsonlStore<Transaction>(
           filePath: filePath,
           fromJson: Transaction.fromJson,
-          toJson: (t) => t.toJson(),
-          getId: (t) => t.id,
-          getUpdatedAt: (t) => t.updatedAt,
-          getCreatedAt: (t) => t.createdAt,
         );
 
-  Future<List<Transaction>> getAll() =>
-      _store.readActive((t) => t.deleted);
+  Future<List<Transaction>> getAll() => _store.readActive();
 
   Future<void> save(Transaction transaction) => _store.append(transaction);
 

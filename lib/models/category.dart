@@ -1,21 +1,19 @@
 import 'package:freezed_annotation/freezed_annotation.dart';
+import '../data/storage/jsonl_storable.dart';
+import 'path_helper.dart';
+import 'transaction.dart';
 
 part 'category.freezed.dart';
 part 'category.g.dart';
 
-enum CategoryParentType {
-  income,
-  expense,
-}
-
 @freezed
-abstract class Category with _$Category {
+abstract class Category with _$Category, PathHelper implements JsonlStorable {
   const Category._();
 
   const factory Category({
     required String id,
     required String path,
-    required CategoryParentType parentType,
+    required TransactionType parentType,
     String? icon,
     String? color,
     required DateTime createdAt,
@@ -25,16 +23,4 @@ abstract class Category with _$Category {
 
   factory Category.fromJson(Map<String, dynamic> json) =>
       _$CategoryFromJson(json);
-
-  /// Returns the segments of the path (e.g., "Food::Snacks::Cake" -> ["Food", "Snacks", "Cake"]).
-  List<String> get pathSegments => path.split('::');
-
-  /// Returns the root category name (e.g., "Food::Snacks::Cake" -> "Food").
-  String get root => pathSegments.first;
-
-  /// Returns the leaf name (e.g., "Food::Snacks::Cake" -> "Cake").
-  String get displayName => pathSegments.last;
-
-  /// Returns the depth of the category (e.g., "Food" -> 1, "Food::Snacks" -> 2).
-  int get depth => pathSegments.length;
 }

@@ -22,10 +22,6 @@ void main() {
     JsonlStore<Currency> createStore() => JsonlStore<Currency>(
           filePath: filePath,
           fromJson: Currency.fromJson,
-          toJson: (c) => c.toJson(),
-          getId: (c) => c.id,
-          getUpdatedAt: (c) => c.updatedAt,
-          getCreatedAt: (c) => c.createdAt,
         );
 
     final now = DateTime.utc(2026, 4, 19);
@@ -121,7 +117,7 @@ void main() {
       );
 
       await store.appendAll([active, deleted]);
-      final result = await store.readActive((c) => c.deleted);
+      final result = await store.readActive();
 
       expect(result, hasLength(1));
       expect(result.first.code, 'USD');
@@ -147,7 +143,7 @@ void main() {
       expect(all, hasLength(1));
       expect(all.first.deleted, true);
 
-      final active = await store.readActive((c) => c.deleted);
+      final active = await store.readActive();
       expect(active, isEmpty);
     });
 
@@ -160,7 +156,7 @@ void main() {
           id: 'cur-$i',
           code: 'C$i',
           name: 'Currency $i',
-          type: CurrencyType.custom,
+          type: CurrencyType.fiat,
           createdAt: now,
         ));
       }
@@ -171,7 +167,7 @@ void main() {
           id: 'cur-new',
           code: 'NEW',
           name: 'New Currency',
-          type: CurrencyType.custom,
+          type: CurrencyType.fiat,
           createdAt: now,
         ),
       ]);
@@ -204,10 +200,6 @@ void main() {
       final store = JsonlStore<Currency>(
         filePath: deepPath,
         fromJson: Currency.fromJson,
-        toJson: (c) => c.toJson(),
-        getId: (c) => c.id,
-        getUpdatedAt: (c) => c.updatedAt,
-        getCreatedAt: (c) => c.createdAt,
       );
 
       await store.append(Currency(

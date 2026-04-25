@@ -8,14 +8,9 @@ class CurrencyRepository {
       : _store = JsonlStore<Currency>(
           filePath: filePath,
           fromJson: Currency.fromJson,
-          toJson: (c) => c.toJson(),
-          getId: (c) => c.id,
-          getUpdatedAt: (c) => c.updatedAt,
-          getCreatedAt: (c) => c.createdAt,
         );
 
-  Future<List<Currency>> getAll() =>
-      _store.readActive((c) => c.deleted);
+  Future<List<Currency>> getAll() => _store.readActive();
 
   Future<void> save(Currency currency) => _store.append(currency);
 

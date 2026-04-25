@@ -1,4 +1,6 @@
 import 'package:freezed_annotation/freezed_annotation.dart';
+import '../data/storage/jsonl_storable.dart';
+import 'path_helper.dart';
 
 part 'account.freezed.dart';
 part 'account.g.dart';
@@ -12,7 +14,7 @@ enum AccountType {
 }
 
 @freezed
-abstract class Account with _$Account {
+abstract class Account with _$Account, PathHelper implements JsonlStorable {
   const Account._();
 
   const factory Account({
@@ -28,13 +30,4 @@ abstract class Account with _$Account {
 
   factory Account.fromJson(Map<String, dynamic> json) =>
       _$AccountFromJson(json);
-
-  /// Returns the segments of the path (e.g., "Chase::Checking" -> ["Chase", "Checking"]).
-  List<String> get pathSegments => path.split('::');
-
-  /// Returns the top-level group name (e.g., "Chase::Checking" -> "Chase").
-  String get group => pathSegments.first;
-
-  /// Returns the leaf name (e.g., "Chase::Checking" -> "Checking").
-  String get displayName => pathSegments.last;
 }

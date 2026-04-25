@@ -1,4 +1,5 @@
 import 'package:freezed_annotation/freezed_annotation.dart';
+import '../data/storage/jsonl_storable.dart';
 
 part 'currency.freezed.dart';
 part 'currency.g.dart';
@@ -7,11 +8,10 @@ enum CurrencyType {
   fiat,
   stock,
   crypto,
-  custom,
 }
 
 @freezed
-abstract class Currency with _$Currency {
+abstract class Currency with _$Currency implements JsonlStorable {
   const factory Currency({
     required String id,
     required String code,

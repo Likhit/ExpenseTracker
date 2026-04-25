@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:expense_tracker/models/category.dart';
+import 'package:expense_tracker/models/transaction.dart';
 import 'package:expense_tracker/providers/storage_providers.dart';
 import 'package:expense_tracker/ui/screens/categories/category_list_screen.dart';
 
@@ -39,20 +40,20 @@ void main() {
         Category(
           id: 'cat-1',
           path: 'Food',
-          parentType: CategoryParentType.expense,
+          parentType: TransactionType.expense,
           icon: 'restaurant',
           createdAt: now,
         ),
         Category(
           id: 'cat-2',
           path: 'Food::Snacks',
-          parentType: CategoryParentType.expense,
+          parentType: TransactionType.expense,
           createdAt: now,
         ),
         Category(
           id: 'cat-3',
           path: 'Salary',
-          parentType: CategoryParentType.income,
+          parentType: TransactionType.income,
           createdAt: now,
         ),
       ]));

@@ -1,32 +1,27 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'jsonl_storable.dart';
+
 /// Generic append-only JSONL storage.
 ///
 /// Each line is a JSON object with an `id` field. Edits and deletes append
 /// a new line with the same id and a newer timestamp. State is reconstructed
 /// by keeping only the latest version of each id.
-class JsonlStore<T> {
+///
+/// **Append-only delete**: Deleting an entity appends a new line with
+/// `deleted: true` and the same id. On read, deduplication keeps only the
+/// latest version per id, so the deleted version supersedes the original.
+/// Both lines remain in the file — this is intentional for sync/merge support.
+class JsonlStore<T extends JsonlStorable> {
   final File _file;
   final T Function(Map<String, dynamic>) _fromJson;
-  final Map<String, dynamic> Function(T) _toJson;
-  final String Function(T) _getId;
-  final DateTime? Function(T) _getUpdatedAt;
-  final DateTime Function(T) _getCreatedAt;
 
   JsonlStore({
     required String filePath,
     required T Function(Map<String, dynamic>) fromJson,
-    required Map<String, dynamic> Function(T) toJson,
-    required String Function(T) getId,
-    required DateTime? Function(T) getUpdatedAt,
-    required DateTime Function(T) getCreatedAt,
   })  : _file = File(filePath),
-        _fromJson = fromJson,
-        _toJson = toJson,
-        _getId = getId,
-        _getUpdatedAt = getUpdatedAt,
-        _getCreatedAt = getCreatedAt;
+        _fromJson = fromJson;
 
   /// Reads all lines and returns the latest version of each entity.
   Future<List<T>> readAll() async {
@@ -39,11 +34,11 @@ class JsonlStore<T> {
       if (line.trim().isEmpty) continue;
       final json = jsonDecode(line) as Map<String, dynamic>;
       final entity = _fromJson(json);
-      final id = _getId(entity);
-      final existing = map[id];
+      final existing = map[entity.id];
 
-      if (existing == null || _isNewer(entity, existing)) {
-        map[id] = entity;
+      if (existing == null ||
+          _effectiveTime(entity).isAfter(_effectiveTime(existing))) {
+        map[entity.id] = entity;
       }
     }
 
@@ -51,15 +46,15 @@ class JsonlStore<T> {
   }
 
   /// Reads all non-deleted entities.
-  Future<List<T>> readActive(bool Function(T) isDeleted) async {
+  Future<List<T>> readActive() async {
     final all = await readAll();
-    return all.where((e) => !isDeleted(e)).toList();
+    return all.where((e) => !e.deleted).toList();
   }
 
   /// Appends a single entity as a new line.
   Future<void> append(T entity) async {
     await _ensureFileExists();
-    final json = jsonEncode(_toJson(entity));
+    final json = jsonEncode(entity.toJson());
     await _file.writeAsString('$json\n', mode: FileMode.append);
   }
 
@@ -69,7 +64,7 @@ class JsonlStore<T> {
     await _ensureFileExists();
     final buffer = StringBuffer();
     for (final entity in entities) {
-      buffer.writeln(jsonEncode(_toJson(entity)));
+      buffer.writeln(jsonEncode(entity.toJson()));
     }
     await _file.writeAsString(buffer.toString(), mode: FileMode.append);
   }
@@ -79,18 +74,12 @@ class JsonlStore<T> {
     await _ensureFileExists();
     final buffer = StringBuffer();
     for (final entity in entities) {
-      buffer.writeln(jsonEncode(_toJson(entity)));
+      buffer.writeln(jsonEncode(entity.toJson()));
     }
     await _file.writeAsString(buffer.toString());
   }
 
-  bool _isNewer(T candidate, T existing) {
-    final candidateTime =
-        _getUpdatedAt(candidate) ?? _getCreatedAt(candidate);
-    final existingTime =
-        _getUpdatedAt(existing) ?? _getCreatedAt(existing);
-    return candidateTime.isAfter(existingTime);
-  }
+  DateTime _effectiveTime(T entity) => entity.updatedAt ?? entity.createdAt;
 
   Future<void> _ensureFileExists() async {
     if (!await _file.exists()) {

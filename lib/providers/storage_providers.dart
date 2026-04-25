@@ -211,7 +211,7 @@ class CategoriesNotifier extends AsyncNotifier<List<Category>> {
 
   /// Finds or creates a category by path, returning the category.
   Future<Category> findOrCreate(
-      String path, CategoryParentType parentType) async {
+      String path, TransactionType parentType) async {
     final current = state.value ?? [];
     final existing = current.where((c) => c.path == path).firstOrNull;
     if (existing != null) return existing;
@@ -232,56 +232,56 @@ List<Category> defaultCategories(DateTime now) => [
       Category(
           id: _uuid.v4(),
           path: 'Food',
-          parentType: CategoryParentType.expense,
+          parentType: TransactionType.expense,
           icon: 'restaurant',
           color: '#FF5722',
           createdAt: now),
       Category(
           id: _uuid.v4(),
           path: 'Transport',
-          parentType: CategoryParentType.expense,
+          parentType: TransactionType.expense,
           icon: 'directions_car',
           color: '#2196F3',
           createdAt: now),
       Category(
           id: _uuid.v4(),
           path: 'Housing',
-          parentType: CategoryParentType.expense,
+          parentType: TransactionType.expense,
           icon: 'home',
           color: '#4CAF50',
           createdAt: now),
       Category(
           id: _uuid.v4(),
           path: 'Health Care',
-          parentType: CategoryParentType.expense,
+          parentType: TransactionType.expense,
           icon: 'local_hospital',
           color: '#E91E63',
           createdAt: now),
       Category(
           id: _uuid.v4(),
           path: 'Education',
-          parentType: CategoryParentType.expense,
+          parentType: TransactionType.expense,
           icon: 'school',
           color: '#9C27B0',
           createdAt: now),
       Category(
           id: _uuid.v4(),
           path: 'Entertainment',
-          parentType: CategoryParentType.expense,
+          parentType: TransactionType.expense,
           icon: 'movie',
           color: '#FF9800',
           createdAt: now),
       Category(
           id: _uuid.v4(),
           path: 'Shopping',
-          parentType: CategoryParentType.expense,
+          parentType: TransactionType.expense,
           icon: 'shopping_bag',
           color: '#795548',
           createdAt: now),
       Category(
           id: _uuid.v4(),
           path: 'Utilities',
-          parentType: CategoryParentType.expense,
+          parentType: TransactionType.expense,
           icon: 'bolt',
           color: '#607D8B',
           createdAt: now),
@@ -289,28 +289,28 @@ List<Category> defaultCategories(DateTime now) => [
       Category(
           id: _uuid.v4(),
           path: 'Salary',
-          parentType: CategoryParentType.income,
+          parentType: TransactionType.income,
           icon: 'work',
           color: '#4CAF50',
           createdAt: now),
       Category(
           id: _uuid.v4(),
           path: 'Bonus',
-          parentType: CategoryParentType.income,
+          parentType: TransactionType.income,
           icon: 'card_giftcard',
           color: '#FF9800',
           createdAt: now),
       Category(
           id: _uuid.v4(),
           path: 'Stock Grant',
-          parentType: CategoryParentType.income,
+          parentType: TransactionType.income,
           icon: 'trending_up',
           color: '#2196F3',
           createdAt: now),
       Category(
           id: _uuid.v4(),
           path: 'Interest',
-          parentType: CategoryParentType.income,
+          parentType: TransactionType.income,
           icon: 'account_balance',
           color: '#009688',
           createdAt: now),
