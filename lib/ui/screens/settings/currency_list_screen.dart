@@ -86,8 +86,6 @@ class CurrencyListScreen extends ConsumerWidget {
         return 'Stocks';
       case CurrencyType.crypto:
         return 'Crypto';
-      case CurrencyType.custom:
-        return 'Custom';
     }
   }
 

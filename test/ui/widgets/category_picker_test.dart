@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:expense_tracker/models/category.dart';
+import 'package:expense_tracker/models/transaction.dart';
 import 'package:expense_tracker/providers/storage_providers.dart';
 import 'package:expense_tracker/ui/widgets/category_picker.dart';
 
@@ -13,20 +14,20 @@ void main() {
       Category(
         id: 'cat-1',
         path: 'Food',
-        parentType: CategoryParentType.expense,
+        parentType: TransactionType.expense,
         icon: 'restaurant',
         createdAt: now,
       ),
       Category(
         id: 'cat-2',
         path: 'Food::Snacks',
-        parentType: CategoryParentType.expense,
+        parentType: TransactionType.expense,
         createdAt: now,
       ),
       Category(
         id: 'cat-3',
         path: 'Transport',
-        parentType: CategoryParentType.expense,
+        parentType: TransactionType.expense,
         icon: 'directions_car',
         createdAt: now,
       ),
@@ -47,7 +48,7 @@ void main() {
             body: Padding(
               padding: const EdgeInsets.all(16),
               child: CategoryPicker(
-                parentType: CategoryParentType.expense,
+                parentType: TransactionType.expense,
                 initialPath: initialPath,
                 onSelected: onSelected,
               ),
