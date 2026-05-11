@@ -30,6 +30,18 @@
           system-images-android-34-google-apis-x86-64
         ]);
 
+        # The host's nix post-build hook normally chmods ELF binaries that
+        # ship without execute bits (notably flutter_tester), but it only
+        # fires on freshly substituted/built paths. If an unprivileged dev
+        # user lands on an orphan flutter store path that bypassed the hook,
+        # `flutter test` breaks and they can't repair the path themselves.
+        # This override forces a fresh build hash, which guarantees the fix.
+        flutter = pkgs.flutter.overrideAttrs (old: {
+          postFixup = (old.postFixup or "") + ''
+            find $out -name flutter_tester -type f -exec chmod +x {} \;
+          '';
+        });
+
         # Linux desktop build dependencies for Flutter
         linuxBuildDeps = with pkgs; [
           clang
