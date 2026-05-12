@@ -9,7 +9,7 @@ void main() {
 
     test('creates with required fields', () {
       final currency = Currency(
-        id: 'cur-1',
+        id: const CurrencyId('cur-1'),
         code: const CurrencyCode('USD'),
         name: 'US Dollar',
         type: CurrencyType.fiat,
@@ -25,7 +25,7 @@ void main() {
 
     test('creates stock currency with custom decimal places', () {
       final currency = Currency(
-        id: 'cur-2',
+        id: const CurrencyId('cur-2'),
         code: const CurrencyCode('AAPL'),
         name: 'Apple Inc.',
         type: CurrencyType.stock,
@@ -40,7 +40,7 @@ void main() {
 
     test('serializes to and from JSON', () {
       final currency = Currency(
-        id: 'cur-1',
+        id: const CurrencyId('cur-1'),
         code: const CurrencyCode('USD'),
         name: 'US Dollar',
         type: CurrencyType.fiat,
@@ -57,7 +57,7 @@ void main() {
 
     test('round-trips through JSON string', () {
       final currency = Currency(
-        id: 'cur-1',
+        id: const CurrencyId('cur-1'),
         code: const CurrencyCode('BTC'),
         name: 'Bitcoin',
         type: CurrencyType.crypto,
@@ -73,7 +73,7 @@ void main() {
 
     test('copyWith updates fields', () {
       final currency = Currency(
-        id: 'cur-1',
+        id: const CurrencyId('cur-1'),
         code: const CurrencyCode('USD'),
         name: 'US Dollar',
         type: CurrencyType.fiat,

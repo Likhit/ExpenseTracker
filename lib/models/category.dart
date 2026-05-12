@@ -10,11 +10,11 @@ part 'category.g.dart';
 @freezed
 abstract class Category
     with _$Category, PathHelper
-    implements JsonlStorable<String> {
+    implements JsonlStorable<CategoryId> {
   const Category._();
 
   const factory Category({
-    required String id,
+    @CategoryIdConverter() required CategoryId id,
     @CategoryPathConverter() required CategoryPath path,
     required TransactionType parentType,
     String? icon,

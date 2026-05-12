@@ -14,11 +14,11 @@ enum CurrencyType {
 @freezed
 abstract class Currency
     with _$Currency
-    implements JsonlStorable<String> {
+    implements JsonlStorable<CurrencyId> {
   const Currency._();
 
   const factory Currency({
-    required String id,
+    @CurrencyIdConverter() required CurrencyId id,
     @CurrencyCodeConverter() required CurrencyCode code,
     required String name,
     required CurrencyType type,

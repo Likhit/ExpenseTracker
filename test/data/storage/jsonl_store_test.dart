@@ -20,8 +20,8 @@ void main() {
       }
     });
 
-    JsonlStore<String, Currency> createStore() =>
-        JsonlStore<String, Currency>(
+    JsonlStore<CurrencyId, Currency> createStore() =>
+        JsonlStore<CurrencyId, Currency>(
           filePath: filePath,
           fromJson: Currency.fromJson,
         );
@@ -37,7 +37,7 @@ void main() {
     test('appends and reads a single entity', () async {
       final store = createStore();
       final currency = Currency(
-        id: 'cur-1',
+        id: const CurrencyId('cur-1'),
         code: const CurrencyCode('USD'),
         name: 'US Dollar',
         type: CurrencyType.fiat,
@@ -55,14 +55,14 @@ void main() {
       final store = createStore();
       final currencies = [
         Currency(
-          id: 'cur-1',
+          id: const CurrencyId('cur-1'),
           code: const CurrencyCode('USD'),
           name: 'US Dollar',
           type: CurrencyType.fiat,
           createdAt: now,
         ),
         Currency(
-          id: 'cur-2',
+          id: const CurrencyId('cur-2'),
           code: const CurrencyCode('EUR'),
           name: 'Euro',
           type: CurrencyType.fiat,
@@ -79,7 +79,7 @@ void main() {
     test('readReverse yields entities newest-first, no dedup', () async {
       final store = createStore();
       final original = Currency(
-        id: 'cur-1',
+        id: const CurrencyId('cur-1'),
         code: const CurrencyCode('USD'),
         name: 'US Dollar',
         type: CurrencyType.fiat,
@@ -103,7 +103,7 @@ void main() {
     test('readReverse includes soft-deleted entries', () async {
       final store = createStore();
       final currency = Currency(
-        id: 'cur-1',
+        id: const CurrencyId('cur-1'),
         code: const CurrencyCode('USD'),
         name: 'US Dollar',
         type: CurrencyType.fiat,
@@ -127,7 +127,7 @@ void main() {
 
       for (var i = 0; i < 3; i++) {
         await store.append(Currency(
-          id: 'cur-$i',
+          id: CurrencyId('cur-$i'),
           code: CurrencyCode('C$i'),
           name: 'Currency $i',
           type: CurrencyType.fiat,
@@ -137,7 +137,7 @@ void main() {
 
       await store.writeAll([
         Currency(
-          id: 'cur-new',
+          id: const CurrencyId('cur-new'),
           code: const CurrencyCode('NEW'),
           name: 'New Currency',
           type: CurrencyType.fiat,
@@ -153,7 +153,7 @@ void main() {
     test('handles empty lines gracefully', () async {
       final store = createStore();
       final currency = Currency(
-        id: 'cur-1',
+        id: const CurrencyId('cur-1'),
         code: const CurrencyCode('USD'),
         name: 'US Dollar',
         type: CurrencyType.fiat,
@@ -169,13 +169,13 @@ void main() {
 
     test('creates parent directories if they do not exist', () async {
       final deepPath = '${tempDir.path}/a/b/c/test.jsonl';
-      final store = JsonlStore<String, Currency>(
+      final store = JsonlStore<CurrencyId, Currency>(
         filePath: deepPath,
         fromJson: Currency.fromJson,
       );
 
       await store.append(Currency(
-        id: 'cur-1',
+        id: const CurrencyId('cur-1'),
         code: const CurrencyCode('USD'),
         name: 'US Dollar',
         type: CurrencyType.fiat,

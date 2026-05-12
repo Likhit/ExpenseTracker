@@ -10,7 +10,7 @@ void main() {
 
     test('creates with required fields', () {
       final category = Category(
-        id: 'cat-1',
+        id: const CategoryId('cat-1'),
         path: const CategoryPath('Food'),
         parentType: TransactionType.expense,
         createdAt: now,
@@ -23,7 +23,7 @@ void main() {
 
     test('parses deep hierarchical path', () {
       final category = Category(
-        id: 'cat-2',
+        id: const CategoryId('cat-2'),
         path: const CategoryPath('Food::Snacks::Cake'),
         parentType: TransactionType.expense,
         createdAt: now,
@@ -37,7 +37,7 @@ void main() {
 
     test('root category has depth 1', () {
       final category = Category(
-        id: 'cat-1',
+        id: const CategoryId('cat-1'),
         path: const CategoryPath('Salary'),
         parentType: TransactionType.income,
         createdAt: now,
@@ -50,7 +50,7 @@ void main() {
 
     test('serializes to and from JSON', () {
       final category = Category(
-        id: 'cat-1',
+        id: const CategoryId('cat-1'),
         path: const CategoryPath('Food::Groceries'),
         parentType: TransactionType.expense,
         icon: 'restaurant',
@@ -66,7 +66,7 @@ void main() {
 
     test('round-trips through JSON string', () {
       final category = Category(
-        id: 'cat-1',
+        id: const CategoryId('cat-1'),
         path: const CategoryPath('Health Care::Dental'),
         parentType: TransactionType.expense,
         createdAt: now,

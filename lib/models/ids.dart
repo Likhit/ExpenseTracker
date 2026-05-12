@@ -4,7 +4,11 @@ extension type const AccountId(String value) {}
 
 extension type const TransactionId(String value) {}
 
+extension type const CategoryId(String value) {}
+
 extension type const CategoryPath(String value) {}
+
+extension type const CurrencyId(String value) {}
 
 extension type const CurrencyCode(String value) {}
 
@@ -24,6 +28,14 @@ class TransactionIdConverter implements JsonConverter<TransactionId, String> {
   String toJson(TransactionId object) => object.value;
 }
 
+class CategoryIdConverter implements JsonConverter<CategoryId, String> {
+  const CategoryIdConverter();
+  @override
+  CategoryId fromJson(String json) => CategoryId(json);
+  @override
+  String toJson(CategoryId object) => object.value;
+}
+
 class CategoryPathConverter implements JsonConverter<CategoryPath, String> {
   const CategoryPathConverter();
   @override
@@ -40,6 +52,14 @@ class NullableCategoryPathConverter
       json == null ? null : CategoryPath(json);
   @override
   String? toJson(CategoryPath? object) => object?.value;
+}
+
+class CurrencyIdConverter implements JsonConverter<CurrencyId, String> {
+  const CurrencyIdConverter();
+  @override
+  CurrencyId fromJson(String json) => CurrencyId(json);
+  @override
+  String toJson(CurrencyId object) => object.value;
 }
 
 class CurrencyCodeConverter implements JsonConverter<CurrencyCode, String> {
