@@ -29,6 +29,8 @@ abstract class Account
     required DateTime createdAt,
     DateTime? updatedAt,
     @Default(false) bool deleted,
+    String? lineId,
+    String? prev,
   }) = _Account;
 
   factory Account.fromJson(Map<String, dynamic> json) =>
@@ -40,4 +42,8 @@ abstract class Account
   @override
   Account withDeleted(DateTime updatedAt) =>
       copyWith(deleted: true, updatedAt: updatedAt);
+
+  @override
+  Account withChain({required String lineId, required String? prev}) =>
+      copyWith(lineId: lineId, prev: prev);
 }

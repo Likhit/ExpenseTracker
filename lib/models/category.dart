@@ -22,6 +22,8 @@ abstract class Category
     required DateTime createdAt,
     DateTime? updatedAt,
     @Default(false) bool deleted,
+    String? lineId,
+    String? prev,
   }) = _Category;
 
   factory Category.fromJson(Map<String, dynamic> json) =>
@@ -33,4 +35,8 @@ abstract class Category
   @override
   Category withDeleted(DateTime updatedAt) =>
       copyWith(deleted: true, updatedAt: updatedAt);
+
+  @override
+  Category withChain({required String lineId, required String? prev}) =>
+      copyWith(lineId: lineId, prev: prev);
 }

@@ -27,6 +27,8 @@ abstract class Currency
     required DateTime createdAt,
     DateTime? updatedAt,
     @Default(false) bool deleted,
+    String? lineId,
+    String? prev,
   }) = _Currency;
 
   factory Currency.fromJson(Map<String, dynamic> json) =>
@@ -35,4 +37,8 @@ abstract class Currency
   @override
   Currency withDeleted(DateTime updatedAt) =>
       copyWith(deleted: true, updatedAt: updatedAt);
+
+  @override
+  Currency withChain({required String lineId, required String? prev}) =>
+      copyWith(lineId: lineId, prev: prev);
 }

@@ -111,6 +111,19 @@ class LedgerService {
     }
   }
 
+  /// Idempotent one-shot migration that assigns chain pointers
+  /// (`lineId`/`prev`) to any pre-existing entries that lack them.
+  /// Safe to call on every app start; returns a per-repo summary of
+  /// how many entries were assigned.
+  Future<({int accounts, int categories, int currencies, int transactions})>
+      migrate() async {
+    final a = await _accounts.migrate();
+    final c = await _categories.migrate();
+    final cu = await _currencies.migrate();
+    final t = await _transactions.migrate();
+    return (accounts: a, categories: c, currencies: cu, transactions: t);
+  }
+
   /// Computes balances per account per currency over every transaction
   /// in the journal (including soft-deleted ones, by current design).
   ///
