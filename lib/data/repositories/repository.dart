@@ -1,6 +1,19 @@
 import '../storage/jsonl_storable.dart';
 import '../storage/jsonl_store.dart';
 
+/// Read-only view of a repository.
+///
+/// Exposed by `LedgerService` so external callers can query entities
+/// without being able to mutate the underlying store directly. Writes
+/// must go through service-level helpers (e.g. `LedgerService.saveAccount`)
+/// so validation, chain-pointer maintenance, and aggregator updates can
+/// be enforced uniformly.
+abstract interface class ReadOnlyRepository<Id,
+    T extends JsonlStorable<Id>> {
+  /// Returns the latest version of every entity. Includes soft-deleted ones.
+  Future<List<T>> getAll();
+}
+
 /// Base repository over a [JsonlStore]. Dedups by id when reading.
 ///
 /// The store yields every line in reverse append order (newest first).
@@ -8,12 +21,17 @@ import '../storage/jsonl_store.dart';
 /// since newest is first, that's the current state of every entity. The
 /// returned list includes soft-deleted entries (deleted: true). Callers
 /// who only want active entries should filter.
-class Repository<Id, T extends JsonlStorable<Id>> {
+///
+/// This class is intended as an internal collaborator of `LedgerService`;
+/// production code should not use the write methods directly — go through
+/// the service so validation and later-phase hooks (1.6/1.8) apply.
+class Repository<Id, T extends JsonlStorable<Id>>
+    implements ReadOnlyRepository<Id, T> {
   final JsonlStore<Id, T> store;
 
   Repository(this.store);
 
-  /// Returns the latest version of every entity. Includes soft-deleted ones.
+  @override
   Future<List<T>> getAll() async {
     final seen = <Id>{};
     final result = <T>[];
