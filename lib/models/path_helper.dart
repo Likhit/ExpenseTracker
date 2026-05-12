@@ -1,16 +1,16 @@
 /// Mixin for models with hierarchical `::` separated paths.
+///
+/// Implementations supply [pathString], the raw `::` separated path. The
+/// mixin exposes segment/root/leaf/depth helpers derived from it.
 mixin PathHelper {
-  /// The full `::` separated path (e.g., "Food::Snacks::Cake").
-  String get path;
+  /// Raw `::` separated path string (e.g., "Food::Snacks::Cake").
+  String get pathString;
 
   /// Returns the segments of the path (e.g., "Food::Snacks::Cake" -> ["Food", "Snacks", "Cake"]).
-  List<String> get pathSegments => path.split('::');
+  List<String> get pathSegments => pathString.split('::');
 
-  /// Returns the top-level group/root name (e.g., "Chase::Checking" -> "Chase").
-  String get group => pathSegments.first;
-
-  /// Alias for [group] — the root segment of the path.
-  String get root => group;
+  /// Returns the root segment of the path (e.g., "Chase::Checking" -> "Chase").
+  String get root => pathSegments.first;
 
   /// Returns the leaf name (e.g., "Chase::Checking" -> "Checking").
   String get displayName => pathSegments.last;

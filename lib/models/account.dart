@@ -1,5 +1,6 @@
 import 'package:freezed_annotation/freezed_annotation.dart';
 import '../data/storage/jsonl_storable.dart';
+import 'ids.dart';
 import 'path_helper.dart';
 
 part 'account.freezed.dart';
@@ -14,11 +15,13 @@ enum AccountType {
 }
 
 @freezed
-abstract class Account with _$Account, PathHelper implements JsonlStorable {
+abstract class Account
+    with _$Account, PathHelper
+    implements JsonlStorable<AccountId> {
   const Account._();
 
   const factory Account({
-    required String id,
+    @AccountIdConverter() required AccountId id,
     required String path,
     required AccountType type,
     @Default(false) bool isVirtual,
@@ -30,4 +33,11 @@ abstract class Account with _$Account, PathHelper implements JsonlStorable {
 
   factory Account.fromJson(Map<String, dynamic> json) =>
       _$AccountFromJson(json);
+
+  @override
+  String get pathString => path;
+
+  @override
+  Account withDeleted(DateTime updatedAt) =>
+      copyWith(deleted: true, updatedAt: updatedAt);
 }

@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:expense_tracker/models/currency.dart';
+import 'package:expense_tracker/models/ids.dart';
 
 void main() {
   group('Currency', () {
@@ -9,13 +10,13 @@ void main() {
     test('creates with required fields', () {
       final currency = Currency(
         id: 'cur-1',
-        code: 'USD',
+        code: const CurrencyCode('USD'),
         name: 'US Dollar',
         type: CurrencyType.fiat,
         createdAt: now,
       );
 
-      expect(currency.code, 'USD');
+      expect(currency.code, const CurrencyCode('USD'));
       expect(currency.type, CurrencyType.fiat);
       expect(currency.decimalPlaces, 2);
       expect(currency.deleted, false);
@@ -25,14 +26,14 @@ void main() {
     test('creates stock currency with custom decimal places', () {
       final currency = Currency(
         id: 'cur-2',
-        code: 'AAPL',
+        code: const CurrencyCode('AAPL'),
         name: 'Apple Inc.',
         type: CurrencyType.stock,
         decimalPlaces: 0,
         createdAt: now,
       );
 
-      expect(currency.code, 'AAPL');
+      expect(currency.code, const CurrencyCode('AAPL'));
       expect(currency.type, CurrencyType.stock);
       expect(currency.decimalPlaces, 0);
     });
@@ -40,7 +41,7 @@ void main() {
     test('serializes to and from JSON', () {
       final currency = Currency(
         id: 'cur-1',
-        code: 'USD',
+        code: const CurrencyCode('USD'),
         name: 'US Dollar',
         type: CurrencyType.fiat,
         symbol: r'$',
@@ -57,7 +58,7 @@ void main() {
     test('round-trips through JSON string', () {
       final currency = Currency(
         id: 'cur-1',
-        code: 'BTC',
+        code: const CurrencyCode('BTC'),
         name: 'Bitcoin',
         type: CurrencyType.crypto,
         decimalPlaces: 8,
@@ -73,7 +74,7 @@ void main() {
     test('copyWith updates fields', () {
       final currency = Currency(
         id: 'cur-1',
-        code: 'USD',
+        code: const CurrencyCode('USD'),
         name: 'US Dollar',
         type: CurrencyType.fiat,
         createdAt: now,
@@ -86,7 +87,7 @@ void main() {
 
       expect(updated.deleted, true);
       expect(updated.updatedAt, isNotNull);
-      expect(updated.code, 'USD'); // unchanged
+      expect(updated.code, const CurrencyCode('USD')); // unchanged
     });
   });
 }

@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:expense_tracker/models/category.dart';
+import 'package:expense_tracker/models/ids.dart';
 import 'package:expense_tracker/models/transaction.dart';
 
 void main() {
@@ -10,12 +11,12 @@ void main() {
     test('creates with required fields', () {
       final category = Category(
         id: 'cat-1',
-        path: 'Food',
+        path: const CategoryPath('Food'),
         parentType: TransactionType.expense,
         createdAt: now,
       );
 
-      expect(category.path, 'Food');
+      expect(category.path, const CategoryPath('Food'));
       expect(category.parentType, TransactionType.expense);
       expect(category.deleted, false);
     });
@@ -23,7 +24,7 @@ void main() {
     test('parses deep hierarchical path', () {
       final category = Category(
         id: 'cat-2',
-        path: 'Food::Snacks::Cake',
+        path: const CategoryPath('Food::Snacks::Cake'),
         parentType: TransactionType.expense,
         createdAt: now,
       );
@@ -37,7 +38,7 @@ void main() {
     test('root category has depth 1', () {
       final category = Category(
         id: 'cat-1',
-        path: 'Salary',
+        path: const CategoryPath('Salary'),
         parentType: TransactionType.income,
         createdAt: now,
       );
@@ -50,7 +51,7 @@ void main() {
     test('serializes to and from JSON', () {
       final category = Category(
         id: 'cat-1',
-        path: 'Food::Groceries',
+        path: const CategoryPath('Food::Groceries'),
         parentType: TransactionType.expense,
         icon: 'restaurant',
         color: '#FF5722',
@@ -66,7 +67,7 @@ void main() {
     test('round-trips through JSON string', () {
       final category = Category(
         id: 'cat-1',
-        path: 'Health Care::Dental',
+        path: const CategoryPath('Health Care::Dental'),
         parentType: TransactionType.expense,
         createdAt: now,
       );

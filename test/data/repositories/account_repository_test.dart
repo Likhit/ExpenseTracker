@@ -2,6 +2,7 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:expense_tracker/data/repositories/account_repository.dart';
 import 'package:expense_tracker/models/account.dart';
+import 'package:expense_tracker/models/ids.dart';
 
 void main() {
   group('AccountRepository', () {
@@ -22,7 +23,7 @@ void main() {
 
     test('save and retrieve accounts', () async {
       final account = Account(
-        id: 'acc-1',
+        id: const AccountId('acc-1'),
         path: 'Chase::Checking',
         type: AccountType.asset,
         createdAt: now,
@@ -38,13 +39,13 @@ void main() {
     test('save multiple accounts', () async {
       await repo.saveAll([
         Account(
-          id: 'acc-1',
+          id: const AccountId('acc-1'),
           path: 'Chase::Checking',
           type: AccountType.asset,
           createdAt: now,
         ),
         Account(
-          id: 'acc-2',
+          id: const AccountId('acc-2'),
           path: 'Fidelity::401k',
           type: AccountType.asset,
           createdAt: now,
@@ -55,9 +56,9 @@ void main() {
       expect(accounts, hasLength(2));
     });
 
-    test('delete removes account from active list', () async {
+    test('delete marks account as deleted (latest version)', () async {
       final account = Account(
-        id: 'acc-1',
+        id: const AccountId('acc-1'),
         path: 'Chase::Checking',
         type: AccountType.asset,
         createdAt: now,
@@ -67,12 +68,16 @@ void main() {
       await repo.delete(account);
 
       final accounts = await repo.getAll();
-      expect(accounts, isEmpty);
+      expect(accounts, hasLength(1));
+      expect(accounts.first.deleted, true);
+
+      final active = accounts.where((a) => !a.deleted).toList();
+      expect(active, isEmpty);
     });
 
-    test('update account by saving with same id', () async {
+    test('update account by saving with same id keeps latest', () async {
       final account = Account(
-        id: 'acc-1',
+        id: const AccountId('acc-1'),
         path: 'Chase::Checking',
         type: AccountType.asset,
         createdAt: now,

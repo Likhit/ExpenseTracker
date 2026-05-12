@@ -1,5 +1,6 @@
 import 'package:freezed_annotation/freezed_annotation.dart';
 import '../data/storage/jsonl_storable.dart';
+import 'ids.dart';
 
 part 'currency.freezed.dart';
 part 'currency.g.dart';
@@ -11,10 +12,14 @@ enum CurrencyType {
 }
 
 @freezed
-abstract class Currency with _$Currency implements JsonlStorable {
+abstract class Currency
+    with _$Currency
+    implements JsonlStorable<String> {
+  const Currency._();
+
   const factory Currency({
     required String id,
-    required String code,
+    @CurrencyCodeConverter() required CurrencyCode code,
     required String name,
     required CurrencyType type,
     String? symbol,
@@ -26,4 +31,8 @@ abstract class Currency with _$Currency implements JsonlStorable {
 
   factory Currency.fromJson(Map<String, dynamic> json) =>
       _$CurrencyFromJson(json);
+
+  @override
+  Currency withDeleted(DateTime updatedAt) =>
+      copyWith(deleted: true, updatedAt: updatedAt);
 }

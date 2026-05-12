@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:expense_tracker/models/account.dart';
+import 'package:expense_tracker/models/ids.dart';
 
 void main() {
   group('Account', () {
@@ -8,7 +9,7 @@ void main() {
 
     test('creates with required fields', () {
       final account = Account(
-        id: 'acc-1',
+        id: const AccountId('acc-1'),
         path: 'Chase::Checking',
         type: AccountType.asset,
         createdAt: now,
@@ -22,20 +23,20 @@ void main() {
 
     test('parses hierarchical path segments', () {
       final account = Account(
-        id: 'acc-1',
+        id: const AccountId('acc-1'),
         path: 'Fidelity::401k',
         type: AccountType.asset,
         createdAt: now,
       );
 
       expect(account.pathSegments, ['Fidelity', '401k']);
-      expect(account.group, 'Fidelity');
+      expect(account.root, 'Fidelity');
       expect(account.displayName, '401k');
     });
 
     test('handles flat path (no hierarchy)', () {
       final account = Account(
-        id: 'acc-2',
+        id: const AccountId('acc-2'),
         path: 'Tax Account',
         type: AccountType.expense,
         isVirtual: true,
@@ -43,14 +44,14 @@ void main() {
       );
 
       expect(account.pathSegments, ['Tax Account']);
-      expect(account.group, 'Tax Account');
+      expect(account.root, 'Tax Account');
       expect(account.displayName, 'Tax Account');
       expect(account.isVirtual, true);
     });
 
     test('serializes to and from JSON', () {
       final account = Account(
-        id: 'acc-1',
+        id: const AccountId('acc-1'),
         path: 'Chase::Checking',
         type: AccountType.asset,
         notes: 'Primary checking',
@@ -65,7 +66,7 @@ void main() {
 
     test('round-trips through JSON string', () {
       final account = Account(
-        id: 'acc-1',
+        id: const AccountId('acc-1'),
         path: 'Chase::Savings',
         type: AccountType.asset,
         createdAt: now,

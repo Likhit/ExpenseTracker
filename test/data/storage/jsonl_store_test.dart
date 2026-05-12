@@ -2,6 +2,7 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:expense_tracker/data/storage/jsonl_store.dart';
 import 'package:expense_tracker/models/currency.dart';
+import 'package:expense_tracker/models/ids.dart';
 
 void main() {
   group('JsonlStore', () {
@@ -19,16 +20,17 @@ void main() {
       }
     });
 
-    JsonlStore<Currency> createStore() => JsonlStore<Currency>(
+    JsonlStore<String, Currency> createStore() =>
+        JsonlStore<String, Currency>(
           filePath: filePath,
           fromJson: Currency.fromJson,
         );
 
     final now = DateTime.utc(2026, 4, 19);
 
-    test('returns empty list for non-existent file', () async {
+    test('yields nothing for non-existent file', () async {
       final store = createStore();
-      final result = await store.readAll();
+      final result = await store.readReverse().toList();
       expect(result, isEmpty);
     });
 
@@ -36,32 +38,32 @@ void main() {
       final store = createStore();
       final currency = Currency(
         id: 'cur-1',
-        code: 'USD',
+        code: const CurrencyCode('USD'),
         name: 'US Dollar',
         type: CurrencyType.fiat,
         createdAt: now,
       );
 
       await store.append(currency);
-      final result = await store.readAll();
+      final result = await store.readReverse().toList();
 
       expect(result, hasLength(1));
-      expect(result.first.code, 'USD');
+      expect(result.first.code, const CurrencyCode('USD'));
     });
 
-    test('appends multiple entities', () async {
+    test('appendAll writes multiple entities', () async {
       final store = createStore();
       final currencies = [
         Currency(
           id: 'cur-1',
-          code: 'USD',
+          code: const CurrencyCode('USD'),
           name: 'US Dollar',
           type: CurrencyType.fiat,
           createdAt: now,
         ),
         Currency(
           id: 'cur-2',
-          code: 'EUR',
+          code: const CurrencyCode('EUR'),
           name: 'Euro',
           type: CurrencyType.fiat,
           createdAt: now,
@@ -69,16 +71,16 @@ void main() {
       ];
 
       await store.appendAll(currencies);
-      final result = await store.readAll();
+      final result = await store.readReverse().toList();
 
       expect(result, hasLength(2));
     });
 
-    test('keeps latest version when same id is appended', () async {
+    test('readReverse yields entities newest-first, no dedup', () async {
       final store = createStore();
       final original = Currency(
         id: 'cur-1',
-        code: 'USD',
+        code: const CurrencyCode('USD'),
         name: 'US Dollar',
         type: CurrencyType.fiat,
         createdAt: now,
@@ -91,43 +93,18 @@ void main() {
 
       await store.append(original);
       await store.append(updated);
-      final result = await store.readAll();
+      final result = await store.readReverse().toList();
 
-      expect(result, hasLength(1));
+      expect(result, hasLength(2));
       expect(result.first.name, 'United States Dollar');
+      expect(result.last.name, 'US Dollar');
     });
 
-    test('readActive filters deleted entities', () async {
-      final store = createStore();
-      final active = Currency(
-        id: 'cur-1',
-        code: 'USD',
-        name: 'US Dollar',
-        type: CurrencyType.fiat,
-        createdAt: now,
-      );
-
-      final deleted = Currency(
-        id: 'cur-2',
-        code: 'EUR',
-        name: 'Euro',
-        type: CurrencyType.fiat,
-        createdAt: now,
-        deleted: true,
-      );
-
-      await store.appendAll([active, deleted]);
-      final result = await store.readActive();
-
-      expect(result, hasLength(1));
-      expect(result.first.code, 'USD');
-    });
-
-    test('soft delete by appending with deleted=true', () async {
+    test('readReverse includes soft-deleted entries', () async {
       final store = createStore();
       final currency = Currency(
         id: 'cur-1',
-        code: 'USD',
+        code: const CurrencyCode('USD'),
         name: 'US Dollar',
         type: CurrencyType.fiat,
         createdAt: now,
@@ -139,72 +116,67 @@ void main() {
         updatedAt: now.add(const Duration(hours: 1)),
       ));
 
-      final all = await store.readAll();
-      expect(all, hasLength(1));
+      final all = await store.readReverse().toList();
+      expect(all, hasLength(2));
       expect(all.first.deleted, true);
-
-      final active = await store.readActive();
-      expect(active, isEmpty);
+      expect(all.last.deleted, false);
     });
 
     test('writeAll overwrites entire file', () async {
       final store = createStore();
 
-      // Append 3 entities
       for (var i = 0; i < 3; i++) {
         await store.append(Currency(
           id: 'cur-$i',
-          code: 'C$i',
+          code: CurrencyCode('C$i'),
           name: 'Currency $i',
           type: CurrencyType.fiat,
           createdAt: now,
         ));
       }
 
-      // Overwrite with just 1 entity
       await store.writeAll([
         Currency(
           id: 'cur-new',
-          code: 'NEW',
+          code: const CurrencyCode('NEW'),
           name: 'New Currency',
           type: CurrencyType.fiat,
           createdAt: now,
         ),
       ]);
 
-      final result = await store.readAll();
+      final result = await store.readReverse().toList();
       expect(result, hasLength(1));
-      expect(result.first.code, 'NEW');
+      expect(result.first.code, const CurrencyCode('NEW'));
     });
 
     test('handles empty lines gracefully', () async {
       final store = createStore();
       final currency = Currency(
         id: 'cur-1',
-        code: 'USD',
+        code: const CurrencyCode('USD'),
         name: 'US Dollar',
         type: CurrencyType.fiat,
         createdAt: now,
       );
 
       await store.append(currency);
-      // Manually append empty lines
       await File(filePath).writeAsString('\n\n', mode: FileMode.append);
 
-      final result = await store.readAll();
+      final result = await store.readReverse().toList();
       expect(result, hasLength(1));
     });
 
     test('creates parent directories if they do not exist', () async {
       final deepPath = '${tempDir.path}/a/b/c/test.jsonl';
-      final store = JsonlStore<Currency>(
+      final store = JsonlStore<String, Currency>(
         filePath: deepPath,
         fromJson: Currency.fromJson,
       );
 
       await store.append(Currency(
         id: 'cur-1',
-        code: 'USD',
+        code: const CurrencyCode('USD'),
         name: 'US Dollar',
         type: CurrencyType.fiat,
         createdAt: now,

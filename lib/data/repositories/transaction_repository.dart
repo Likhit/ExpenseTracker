@@ -1,23 +1,12 @@
+import '../../models/ids.dart';
 import '../../models/transaction.dart';
 import '../storage/jsonl_store.dart';
+import 'repository.dart';
 
-class TransactionRepository {
-  final JsonlStore<Transaction> _store;
-
+class TransactionRepository extends Repository<TransactionId, Transaction> {
   TransactionRepository({required String filePath})
-      : _store = JsonlStore<Transaction>(
+      : super(JsonlStore<TransactionId, Transaction>(
           filePath: filePath,
           fromJson: Transaction.fromJson,
-        );
-
-  Future<List<Transaction>> getAll() => _store.readActive();
-
-  Future<void> save(Transaction transaction) => _store.append(transaction);
-
-  Future<void> saveAll(List<Transaction> transactions) =>
-      _store.appendAll(transactions);
-
-  Future<void> delete(Transaction transaction) => _store.append(
-        transaction.copyWith(deleted: true, updatedAt: DateTime.now()),
-      );
+        ));
 }

@@ -5,15 +5,12 @@ import 'jsonl_storable.dart';
 
 /// Generic append-only JSONL storage.
 ///
-/// Each line is a JSON object with an `id` field. Edits and deletes append
-/// a new line with the same id and a newer timestamp. State is reconstructed
-/// by keeping only the latest version of each id.
-///
-/// **Append-only delete**: Deleting an entity appends a new line with
-/// `deleted: true` and the same id. On read, deduplication keeps only the
-/// latest version per id, so the deleted version supersedes the original.
-/// Both lines remain in the file — this is intentional for sync/merge support.
-class JsonlStore<T extends JsonlStorable> {
+/// Each line is a JSON object. Edits and deletes append a new line with
+/// the same id and a newer timestamp. The store yields raw lines — it
+/// does not deduplicate by id, does not filter deleted entries, and does
+/// not attempt to reconstruct logical state. Those concerns belong to
+/// the [Repository] layer (dedup) and the caller (filtering deletes).
+class JsonlStore<Id, T extends JsonlStorable<Id>> {
   final File _file;
   final T Function(Map<String, dynamic>) _fromJson;
 
@@ -23,32 +20,23 @@ class JsonlStore<T extends JsonlStorable> {
   })  : _file = File(filePath),
         _fromJson = fromJson;
 
-  /// Reads all lines and returns the latest version of each entity.
-  Future<List<T>> readAll() async {
-    if (!await _file.exists()) return [];
-
+  /// Streams entities in reverse append order (most recently written first).
+  ///
+  /// Yields every line as-is — no dedup, no deleted-filtering. Callers can
+  /// `.take(n)` / `.firstWhere(...)` for partial reads.
+  ///
+  /// TODO: current implementation loads the whole file then yields reversed
+  /// for simplicity. Swap to chunked seek-from-EOF for true laziness when
+  /// transaction files grow large.
+  Stream<T> readReverse() async* {
+    if (!await _file.exists()) return;
     final lines = await _file.readAsLines();
-    final map = <String, T>{};
-
-    for (final line in lines) {
+    for (var i = lines.length - 1; i >= 0; i--) {
+      final line = lines[i];
       if (line.trim().isEmpty) continue;
       final json = jsonDecode(line) as Map<String, dynamic>;
-      final entity = _fromJson(json);
-      final existing = map[entity.id];
-
-      if (existing == null ||
-          _effectiveTime(entity).isAfter(_effectiveTime(existing))) {
-        map[entity.id] = entity;
-      }
+      yield _fromJson(json);
     }
-
-    return map.values.toList();
-  }
-
-  /// Reads all non-deleted entities.
-  Future<List<T>> readActive() async {
-    final all = await readAll();
-    return all.where((e) => !e.deleted).toList();
   }
 
   /// Appends a single entity as a new line.
@@ -78,8 +66,6 @@ class JsonlStore<T extends JsonlStorable> {
     }
     await _file.writeAsString(buffer.toString());
   }
-
-  DateTime _effectiveTime(T entity) => entity.updatedAt ?? entity.createdAt;
 
   Future<void> _ensureFileExists() async {
     if (!await _file.exists()) {
