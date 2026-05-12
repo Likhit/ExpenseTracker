@@ -68,7 +68,7 @@ void main() {
     });
 
     test('writes through the facade persist to disk', () async {
-      await ledger.saveTransaction(balancedExpense());
+      await ledger.save(balancedExpense());
 
       final reread = makeLedger();
       final txs = await reread.transactions.getAll();
@@ -86,7 +86,7 @@ void main() {
         createdAt: now,
       );
 
-      await ledger.saveAccount(account);
+      await ledger.save(account);
       final accounts = await ledger.accounts.getAll();
 
       expect(accounts, hasLength(1));
@@ -101,8 +101,8 @@ void main() {
         createdAt: now,
       );
 
-      await ledger.saveAccount(account);
-      await ledger.deleteAccount(account);
+      await ledger.save(account);
+      await ledger.delete(account);
 
       final accounts = await ledger.accounts.getAll();
       expect(accounts, hasLength(1));
@@ -112,7 +112,7 @@ void main() {
 
   group('saveTransaction', () {
     test('validates and saves a balanced transaction', () async {
-      final result = await ledger.saveTransaction(balancedExpense());
+      final result = await ledger.save(balancedExpense());
 
       expect(result.isValid, true);
       expect(await ledger.transactions.getAll(), hasLength(1));
@@ -139,7 +139,7 @@ void main() {
         createdAt: now,
       );
 
-      final result = await ledger.saveTransaction(tx);
+      final result = await ledger.save(tx);
 
       expect(result.isValid, false);
       expect(result.errorMessage, contains('do not balance'));
@@ -165,14 +165,14 @@ void main() {
         createdAt: now,
       );
 
-      final result = await ledger.saveAllTransactions([good, bad]);
+      final result = await ledger.saveAll([good, bad]);
 
       expect(result.isValid, false);
       expect(await ledger.transactions.getAll(), isEmpty);
     });
 
     test('saves all when every transaction is valid', () async {
-      final result = await ledger.saveAllTransactions([
+      final result = await ledger.saveAll([
         balancedExpense(id: 'tx-1'),
         balancedExpense(id: 'tx-2'),
       ]);
@@ -188,7 +188,7 @@ void main() {
     });
 
     test('computes single-currency expense correctly', () async {
-      await ledger.saveTransaction(balancedExpense());
+      await ledger.save(balancedExpense());
 
       final balances = await ledger.computeBalances();
 
@@ -203,7 +203,7 @@ void main() {
     });
 
     test('accumulates multiple transactions for same account', () async {
-      await ledger.saveAllTransactions([
+      await ledger.saveAll([
         Transaction(
           id: const TransactionId('tx-1'),
           date: now,
@@ -251,7 +251,7 @@ void main() {
     });
 
     test('handles multi-currency accounts', () async {
-      await ledger.saveTransaction(
+      await ledger.save(
         Transaction(
           id: const TransactionId('tx-1'),
           date: now,

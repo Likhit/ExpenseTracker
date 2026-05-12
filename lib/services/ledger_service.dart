@@ -5,21 +5,24 @@ import '../data/repositories/category_repository.dart';
 import '../data/repositories/currency_repository.dart';
 import '../data/repositories/repository.dart';
 import '../data/repositories/transaction_repository.dart';
+import '../data/storage/jsonl_storable.dart';
 import '../models/account.dart';
 import '../models/category.dart';
 import '../models/currency.dart';
 import '../models/ids.dart';
 import '../models/transaction.dart';
+import '../models/validatable.dart';
 import '../models/validation_result.dart';
 
 /// Single entry point for the double-entry engine.
 ///
 /// Owns the four append-only JSONL repositories internally. External
 /// callers get read-only access via `ledger.accounts`, `ledger.categories`,
-/// `ledger.currencies`, `ledger.transactions`. All writes must go through
-/// the service-level helpers (`saveAccount`, `saveTransaction`, …) so
-/// validation, chain-pointer maintenance (Phase 1.6), and aggregator
-/// updates (Phase 1.8) can be enforced uniformly.
+/// `ledger.currencies`, `ledger.transactions`. All writes go through the
+/// generic `save` / `saveAll` / `delete` methods below — they validate
+/// (when the entity opts into [Validatable]) and dispatch to the right
+/// repository based on the entity type. Phase 1.6 (chain pointers) and
+/// Phase 1.8 (aggregator updates) will hook into these same methods.
 class LedgerService {
   final AccountRepository _accounts;
   final CategoryRepository _categories;
@@ -42,45 +45,72 @@ class LedgerService {
   ReadOnlyRepository<TransactionId, Transaction> get transactions =>
       _transactions;
 
-  Future<void> saveAccount(Account account) => _accounts.save(account);
-  Future<void> saveAllAccounts(List<Account> accounts) =>
-      _accounts.saveAll(accounts);
-  Future<void> deleteAccount(Account account) => _accounts.delete(account);
-
-  Future<void> saveCategory(Category category) => _categories.save(category);
-  Future<void> saveAllCategories(List<Category> categories) =>
-      _categories.saveAll(categories);
-  Future<void> deleteCategory(Category category) =>
-      _categories.delete(category);
-
-  Future<void> saveCurrency(Currency currency) => _currencies.save(currency);
-  Future<void> saveAllCurrencies(List<Currency> currencies) =>
-      _currencies.saveAll(currencies);
-  Future<void> deleteCurrency(Currency currency) =>
-      _currencies.delete(currency);
-
-  /// Validates [tx] and saves it if valid. Returns the validation result;
-  /// no write happens on failure.
-  Future<ValidationResult> saveTransaction(Transaction tx) async {
-    final result = tx.validate();
-    if (!result.isValid) return result;
-    await _transactions.save(tx);
-    return result;
-  }
-
-  /// Validates every transaction first; if any is invalid, returns the
-  /// first failure and writes nothing. On success, writes all and
-  /// returns [ValidationResult.ok].
-  Future<ValidationResult> saveAllTransactions(List<Transaction> txs) async {
-    for (final tx in txs) {
-      final result = tx.validate();
+  /// Validates [entity] (when it implements [Validatable]) and persists
+  /// it to the matching repository. Returns the validation result; on
+  /// failure, no write happens.
+  Future<ValidationResult> save<T extends JsonlEntity>(T entity) async {
+    if (entity is Validatable) {
+      final result = (entity as Validatable).validate();
       if (!result.isValid) return result;
     }
-    await _transactions.saveAll(txs);
+    switch (entity) {
+      case Account a:
+        await _accounts.save(a);
+      case Category c:
+        await _categories.save(c);
+      case Currency cur:
+        await _currencies.save(cur);
+      case Transaction t:
+        await _transactions.save(t);
+      default:
+        throw StateError('Unsupported entity type: ${entity.runtimeType}');
+    }
     return ValidationResult.ok();
   }
 
-  Future<void> deleteTransaction(Transaction tx) => _transactions.delete(tx);
+  /// Validates every entity first; if any is invalid, returns the first
+  /// failure and writes nothing. Otherwise persists all to the matching
+  /// repository. The list is assumed to be homogeneous in entity type.
+  Future<ValidationResult> saveAll<T extends JsonlEntity>(
+      List<T> entities) async {
+    if (entities.isEmpty) return ValidationResult.ok();
+    for (final e in entities) {
+      if (e is Validatable) {
+        final result = (e as Validatable).validate();
+        if (!result.isValid) return result;
+      }
+    }
+    switch (entities.first) {
+      case Account _:
+        await _accounts.saveAll(entities.cast<Account>());
+      case Category _:
+        await _categories.saveAll(entities.cast<Category>());
+      case Currency _:
+        await _currencies.saveAll(entities.cast<Currency>());
+      case Transaction _:
+        await _transactions.saveAll(entities.cast<Transaction>());
+      default:
+        throw StateError(
+            'Unsupported entity type: ${entities.first.runtimeType}');
+    }
+    return ValidationResult.ok();
+  }
+
+  /// Soft-deletes [entity] by appending a new version with `deleted: true`.
+  Future<void> delete<T extends JsonlEntity>(T entity) async {
+    switch (entity) {
+      case Account a:
+        await _accounts.delete(a);
+      case Category c:
+        await _categories.delete(c);
+      case Currency cur:
+        await _currencies.delete(cur);
+      case Transaction t:
+        await _transactions.delete(t);
+      default:
+        throw StateError('Unsupported entity type: ${entity.runtimeType}');
+    }
+  }
 
   /// Computes balances per account per currency over every transaction
   /// in the journal (including soft-deleted ones, by current design).

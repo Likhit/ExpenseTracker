@@ -4,6 +4,7 @@ import 'package:freezed_annotation/freezed_annotation.dart';
 import '../data/storage/jsonl_storable.dart';
 import 'ids.dart';
 import 'leg.dart';
+import 'validatable.dart';
 import 'validation_result.dart';
 
 part 'transaction.freezed.dart';
@@ -18,7 +19,7 @@ enum TransactionType {
 @freezed
 abstract class Transaction
     with _$Transaction
-    implements JsonlStorable<TransactionId> {
+    implements JsonlStorable<TransactionId>, Validatable {
   const Transaction._();
 
   const factory Transaction({
@@ -46,6 +47,7 @@ abstract class Transaction
   /// For cross-currency: must involve exactly two currencies and carry
   /// `exchangeRate` in metadata (each currency's legs are not expected
   /// to sum to zero; the exchange is recorded separately).
+  @override
   ValidationResult validate() {
     if (legs.length < 2) {
       return ValidationResult.error('Transaction must have at least 2 legs');
