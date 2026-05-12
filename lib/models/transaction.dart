@@ -4,7 +4,6 @@ import 'package:freezed_annotation/freezed_annotation.dart';
 import '../data/storage/jsonl_storable.dart';
 import 'ids.dart';
 import 'leg.dart';
-import 'validatable.dart';
 import 'validation_result.dart';
 
 part 'transaction.freezed.dart';

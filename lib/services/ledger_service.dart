@@ -11,7 +11,6 @@ import '../models/category.dart';
 import '../models/currency.dart';
 import '../models/ids.dart';
 import '../models/transaction.dart';
-import '../models/validatable.dart';
 import '../models/validation_result.dart';
 
 /// Single entry point for the double-entry engine.
