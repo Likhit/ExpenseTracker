@@ -10,8 +10,12 @@ import '../models/account.dart';
 import '../models/category.dart';
 import '../models/currency.dart';
 import '../models/ids.dart';
+import '../models/leg.dart';
 import '../models/transaction.dart';
 import '../models/validation_result.dart';
+import 'query/ledger_filter.dart';
+import 'query/ledger_group.dart';
+import 'query/ledger_stats.dart';
 
 /// Single entry point for the double-entry engine.
 ///
@@ -22,13 +26,19 @@ import '../models/validation_result.dart';
 /// (when the entity opts into [Validatable]) and dispatch to the right
 /// repository based on the entity type. Phase 1.8 (aggregator updates)
 /// will hook into these same methods.
+///
+/// Construction goes through [LedgerService.create] (async) which
+/// guarantees the built-in Expense and Income accounts exist on disk
+/// before returning. Every expense leg uses [Account.expenseId] and
+/// every income leg uses [Account.incomeId]; callers never create
+/// those accounts manually.
 class LedgerService {
   final AccountRepository _accounts;
   final CategoryRepository _categories;
   final CurrencyRepository _currencies;
   final TransactionRepository _transactions;
 
-  LedgerService({
+  LedgerService._({
     required String accountsPath,
     required String categoriesPath,
     required String currenciesPath,
@@ -37,6 +47,47 @@ class LedgerService {
         _categories = CategoryRepository(filePath: categoriesPath),
         _currencies = CurrencyRepository(filePath: currenciesPath),
         _transactions = TransactionRepository(filePath: transactionsPath);
+
+  /// Constructs a [LedgerService] over the given JSONL paths and ensures
+  /// the built-in Expense and Income accounts are present on disk
+  /// (creating them with stable ids the first time around).
+  static Future<LedgerService> create({
+    required String accountsPath,
+    required String categoriesPath,
+    required String currenciesPath,
+    required String transactionsPath,
+  }) async {
+    final ledger = LedgerService._(
+      accountsPath: accountsPath,
+      categoriesPath: categoriesPath,
+      currenciesPath: currenciesPath,
+      transactionsPath: transactionsPath,
+    );
+    await ledger._ensureBuiltinAccounts();
+    return ledger;
+  }
+
+  Future<void> _ensureBuiltinAccounts() async {
+    final existingIds = (await _accounts.getAll()).map((a) => a.id).toSet();
+    final now = DateTime.now();
+    final missing = <Account>[
+      if (!existingIds.contains(Account.expenseId))
+        Account(
+          id: Account.expenseId,
+          path: 'Expense',
+          type: AccountType.expense,
+          createdAt: now,
+        ),
+      if (!existingIds.contains(Account.incomeId))
+        Account(
+          id: Account.incomeId,
+          path: 'Income',
+          type: AccountType.income,
+          createdAt: now,
+        ),
+    ];
+    if (missing.isNotEmpty) await _accounts.saveAll(missing);
+  }
 
   ReadOnlyRepository<AccountId, Account> get accounts => _accounts;
   ReadOnlyRepository<CategoryId, Category> get categories => _categories;
@@ -111,22 +162,104 @@ class LedgerService {
     }
   }
 
-  /// Computes balances per account per currency over every transaction
-  /// in the journal (including soft-deleted ones, by current design).
+  /// Filters legs by [filter] and optionally nests them along [groupBy]
+  /// into a [QueryResult] tree. With no `groupBy`, the result is a single
+  /// [LeafResult] holding every matching transaction and the total stats.
+  /// With `groupBy`, the result is a [NodeResult] rooted at `GroupKey.none()`
+  /// whose subtree partitions the matching legs along each dimension —
+  /// leaves carry the per-bucket transactions and stats; intermediate
+  /// nodes derive theirs from the subtree.
   ///
-  /// Phase 1.7 will introduce a filter+group `query` API; until then,
-  /// this remains the only read-side aggregation on `LedgerService`.
-  Future<Map<AccountId, Map<CurrencyCode, Decimal>>> computeBalances() async {
-    final txs = await _transactions.getAll();
-    final balances = <AccountId, Map<CurrencyCode, Decimal>>{};
-    for (final tx in txs) {
-      for (final leg in tx.legs) {
-        balances.putIfAbsent(leg.accountId, () => {}).update(
-              leg.currencyCode,
-              (existing) => existing + leg.amount,
-              ifAbsent: () => leg.amount,
-            );
+  /// Consumes the transaction repo as a stream so non-matching rows are
+  /// discarded without ever sitting in memory; only legs that survive
+  /// [filter] are held while the tree is built.
+  Future<QueryResult> query(
+    LedgerFilter filter, {
+    List<GroupDimension> groupBy = const [],
+  }) async {
+    final matchedLegs = <({Leg leg, Transaction tx})>[];
+    await for (final tx in _transactions.streamAll()) {
+      final legs = filter.apply(tx);
+      if (legs.isEmpty) continue;
+      for (final leg in legs) {
+        matchedLegs.add((leg: leg, tx: tx));
       }
+    }
+    return _buildTree(matchedLegs, groupBy, const GroupKey.none());
+  }
+
+  QueryResult _buildTree(
+    List<({Leg leg, Transaction tx})> legs,
+    List<GroupDimension> remaining,
+    GroupKey key,
+  ) {
+    if (remaining.isEmpty) {
+      return QueryResult.leaf(
+        key: key,
+        transactions: _uniqueTxs(legs),
+        stats: _statsOf(legs),
+      );
+    }
+    final dim = remaining.first;
+    final rest = remaining.sublist(1);
+
+    // Insertion-ordered: groups appear in the order their first leg was
+    // encountered. Deterministic given the input stream order.
+    final buckets = <GroupKey, List<({Leg leg, Transaction tx})>>{};
+    for (final ml in legs) {
+      final k = dim.keyFor(ml.leg, ml.tx);
+      buckets.putIfAbsent(k, () => []).add(ml);
+    }
+
+    final children = [
+      for (final entry in buckets.entries)
+        _buildTree(entry.value, rest, entry.key),
+    ];
+    return QueryResult.node(
+      key: key,
+      children: children,
+      stats: combineStats(children.map((c) => c.stats)),
+    );
+  }
+
+  Stats _statsOf(List<({Leg leg, Transaction tx})> legs) {
+    final sums = <CurrencyCode, Decimal>{};
+    for (final ml in legs) {
+      sums.update(
+        ml.leg.currencyCode,
+        (existing) => existing + ml.leg.amount,
+        ifAbsent: () => ml.leg.amount,
+      );
+    }
+    return Stats(count: legs.length, sumByCurrency: sums);
+  }
+
+  List<Transaction> _uniqueTxs(List<({Leg leg, Transaction tx})> legs) {
+    final seen = <TransactionId>{};
+    final result = <Transaction>[];
+    for (final ml in legs) {
+      if (seen.add(ml.tx.id)) result.add(ml.tx);
+    }
+    return result;
+  }
+
+  /// Convenience: balances per account per currency. Soft-deleted
+  /// transactions are excluded by default (same default as [query]).
+  Future<Map<AccountId, Map<CurrencyCode, Decimal>>> computeBalances() async {
+    final result = await query(
+      const LedgerFilter(),
+      groupBy: const [GroupDimension.byAccount(), GroupDimension.byCurrency()],
+    );
+    final balances = <AccountId, Map<CurrencyCode, Decimal>>{};
+    for (final accountNode in result.children) {
+      final accountKey = accountNode.key as AccountKey;
+      final perCurrency = <CurrencyCode, Decimal>{};
+      for (final currencyLeaf in accountNode.children) {
+        final currencyKey = currencyLeaf.key as CurrencyKey;
+        final sum = currencyLeaf.stats.sumByCurrency[currencyKey.code];
+        if (sum != null) perCurrency[currencyKey.code] = sum;
+      }
+      balances[accountKey.id] = perCurrency;
     }
     return balances;
   }

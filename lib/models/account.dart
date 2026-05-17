@@ -37,6 +37,14 @@ abstract class Account
   factory Account.fromJson(Map<String, dynamic> json) =>
       _$AccountFromJson(json);
 
+  /// Stable id of the built-in Expense account that every ledger owns.
+  /// Created automatically by `LedgerService.create`; never deleted.
+  static const AccountId expenseId = AccountId('builtin-expense');
+
+  /// Stable id of the built-in Income account. Same lifecycle as
+  /// [expenseId].
+  static const AccountId incomeId = AccountId('builtin-income');
+
   @override
   String get pathString => path;
 
