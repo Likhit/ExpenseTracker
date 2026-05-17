@@ -132,5 +132,17 @@ void main() {
       final b = Stats.defaults().apply(leg(amount: '5'), tx());
       expect(a, b);
     });
+
+    test('is a Stat itself; value is self', () {
+      final s = Stats.defaults().apply(leg(amount: '5'), tx());
+      // Conforms to Stat<Stats> — anything that takes a Stat takes a
+      // Stats. value returns the container itself.
+      final Stat<Stats> asStat = s;
+      expect(asStat.value, same(s));
+      // apply / combine via the Stat surface still produce a Stats.
+      final applied = asStat.apply(leg(amount: '2'), tx());
+      expect(applied, isA<Stats>());
+      expect((applied as Stats).count, 2);
+    });
   });
 }

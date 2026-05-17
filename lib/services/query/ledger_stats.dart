@@ -14,10 +14,11 @@ part 'ledger_stats.freezed.dart';
 /// of kinds is fixed at construction time — operations like [apply] and
 /// [combine] preserve the same shape.
 ///
-/// Built-in callers reach for the convenience getters ([count],
-/// [sumByCurrency]); a custom-defined view declares its template via
-/// [Stats.of] and reads via [get].
-class Stats {
+/// [Stats] is itself a [Stat] (composite). Its `value` is the [Stats]
+/// container itself — callers reach for the typed [get] / convenience
+/// getters ([count], [sumByCurrency]) rather than for `value` directly,
+/// but any code that takes a [Stat] can take a [Stats] uniformly.
+class Stats implements Stat<Stats> {
   final Map<Type, Stat> _stats;
 
   const Stats._(this._stats);
@@ -34,7 +35,13 @@ class Stats {
         SumByCurrencyStat.empty,
       ]);
 
+  /// Self — [Stats] is its own value so callers use [get] /
+  /// [count] / [sumByCurrency] without indirection.
+  @override
+  Stats get value => this;
+
   /// Returns a new [Stats] with [leg] folded into every contained stat.
+  @override
   Stats apply(Leg leg, Transaction tx) => Stats._({
         for (final entry in _stats.entries)
           entry.key: entry.value.apply(leg, tx),
@@ -42,7 +49,8 @@ class Stats {
 
   /// Combines this with [other] kind-by-kind. The two must have the
   /// same shape (same set of stat kinds).
-  Stats combine(Stats other) {
+  @override
+  Stats combine(covariant Stats other) {
     final result = <Type, Stat>{};
     for (final entry in _stats.entries) {
       final otherStat = other._stats[entry.key];
