@@ -43,16 +43,15 @@ class Repository<Id, T extends JsonlStorable<Id>>
   final JsonlStore<Id, T> store;
 
   /// Most recent `lineId` in the file, or [LineId.first] if the file is
-  /// empty. Built lazily on the first read or write, then maintained
-  /// incrementally.
+  /// empty. `null` means the cache has not been warmed yet; once warmed,
+  /// this is always non-null (a fresh file warms to [LineId.first]).
   LineId? _tip;
-  bool _tipCached = false;
 
   Repository(this.store);
 
   Future<LineId> _ensureTip() async {
-    if (_tipCached) return _tip ?? const LineId.first();
-    LineId? tip;
+    if (_tip != null) return _tip!;
+    LineId tip = const LineId.first();
     await for (final entity in store.readReverse()) {
       // readReverse yields newest-first; the very first entry is the
       // file's current chain tip.
@@ -60,12 +59,11 @@ class Repository<Id, T extends JsonlStorable<Id>>
         throw StateError(
             'Corrupted repository file: persisted entry has no lineId');
       }
-      tip = entity.lineId;
+      tip = entity.lineId!;
       break;
     }
     _tip = tip;
-    _tipCached = true;
-    return tip ?? const LineId.first();
+    return tip;
   }
 
   @override
