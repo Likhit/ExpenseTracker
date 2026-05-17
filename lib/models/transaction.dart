@@ -4,6 +4,7 @@ import 'package:freezed_annotation/freezed_annotation.dart';
 import '../data/storage/jsonl_storable.dart';
 import 'ids.dart';
 import 'leg.dart';
+import 'line_id.dart';
 import 'validation_result.dart';
 
 part 'transaction.freezed.dart';
@@ -31,8 +32,8 @@ abstract class Transaction
     required DateTime createdAt,
     DateTime? updatedAt,
     @Default(false) bool deleted,
-    String? lineId,
-    String? prev,
+    LineId? lineId,
+    @Default(LineId.first()) LineId prev,
   }) = _Transaction;
 
   factory Transaction.fromJson(Map<String, dynamic> json) =>
@@ -43,7 +44,7 @@ abstract class Transaction
       copyWith(deleted: true, updatedAt: updatedAt);
 
   @override
-  Transaction withChain({required String lineId, required String? prev}) =>
+  Transaction withChain({required LineId lineId, required LineId prev}) =>
       copyWith(lineId: lineId, prev: prev);
 
   /// Validates that this transaction's legs balance correctly.

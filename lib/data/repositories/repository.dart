@@ -1,10 +1,11 @@
 import 'package:uuid/uuid.dart';
 
+import '../../models/line_id.dart';
 import '../storage/jsonl_storable.dart';
 import '../storage/jsonl_store.dart';
 
 const _uuid = Uuid();
-String _newLineId() => _uuid.v4();
+LineId _newLineId() => LineId.of(_uuid.v4());
 
 /// Read-only view of a repository.
 ///
@@ -20,7 +21,7 @@ abstract interface class ReadOnlyRepository<Id,
 }
 
 /// Base repository over a [JsonlStore]. Dedups by id when reading and
-/// maintains a per-entity append-chain on every write.
+/// maintains a single per-file append-chain on every write.
 ///
 /// The store yields every line in reverse append order (newest first).
 /// `getAll` walks that stream, keeping the first occurrence of each id —
@@ -29,9 +30,10 @@ abstract interface class ReadOnlyRepository<Id,
 /// who only want active entries should filter.
 ///
 /// On `save`/`saveAll`, the repository generates a fresh `lineId` and
-/// sets `prev` to the lineId of the previous version of the same entity
-/// (or `null` if this is the first version). The lookup uses a lazy
-/// in-memory cache warmed from the file on first access.
+/// sets `prev` to the lineId of the previous append in this file —
+/// regardless of which entity id that append touched. Together, every
+/// append in a single file forms one linear chain. The lookup uses a
+/// lazy in-memory tip cache warmed from the file on first access.
 ///
 /// This class is intended as an internal collaborator of `LedgerService`;
 /// production code should not use the write methods directly — go through
@@ -40,23 +42,30 @@ class Repository<Id, T extends JsonlStorable<Id>>
     implements ReadOnlyRepository<Id, T> {
   final JsonlStore<Id, T> store;
 
-  /// Per-entity cache of the most recent `lineId`. Built lazily on the
-  /// first read or write, then maintained incrementally.
-  Map<Id, String>? _lineIdCache;
+  /// Most recent `lineId` in the file, or [LineId.first] if the file is
+  /// empty. Built lazily on the first read or write, then maintained
+  /// incrementally.
+  LineId? _tip;
+  bool _tipCached = false;
 
   Repository(this.store);
 
-  Future<Map<Id, String>> _ensureCache() async {
-    if (_lineIdCache != null) return _lineIdCache!;
-    final cache = <Id, String>{};
+  Future<LineId> _ensureTip() async {
+    if (_tipCached) return _tip ?? const LineId.first();
+    LineId? tip;
     await for (final entity in store.readReverse()) {
-      // readReverse yields newest-first; first sighting of an id is the
-      // current chain tip.
-      if (entity.lineId == null) continue;
-      cache.putIfAbsent(entity.id, () => entity.lineId!);
+      // readReverse yields newest-first; the very first entry is the
+      // file's current chain tip.
+      if (entity.lineId == null) {
+        throw StateError(
+            'Corrupted repository file: persisted entry has no lineId');
+      }
+      tip = entity.lineId;
+      break;
     }
-    _lineIdCache = cache;
-    return cache;
+    _tip = tip;
+    _tipCached = true;
+    return tip ?? const LineId.first();
   }
 
   @override
@@ -72,68 +81,30 @@ class Repository<Id, T extends JsonlStorable<Id>>
   }
 
   Future<T> save(T entity) async {
-    final cache = await _ensureCache();
-    final prev = cache[entity.id];
+    final prev = await _ensureTip();
     final lineId = _newLineId();
     final chained = entity.withChain(lineId: lineId, prev: prev) as T;
     await store.append(chained);
-    cache[entity.id] = lineId;
+    _tip = lineId;
     return chained;
   }
 
   Future<List<T>> saveAll(List<T> entities) async {
     if (entities.isEmpty) return const [];
-    final cache = await _ensureCache();
+    var prev = await _ensureTip();
     final chained = <T>[];
     for (final entity in entities) {
-      final prev = cache[entity.id];
       final lineId = _newLineId();
       final c = entity.withChain(lineId: lineId, prev: prev) as T;
       chained.add(c);
-      cache[entity.id] = lineId;
+      prev = lineId;
     }
     await store.appendAll(chained);
+    _tip = prev;
     return chained;
   }
 
   /// Soft-deletes by appending a new chained version with deleted=true.
   Future<T> delete(T entity) =>
       save(entity.withDeleted(DateTime.now()) as T);
-
-  /// Idempotent migration: assigns `lineId` and `prev` to any persisted
-  /// entries that pre-date the chain-pointer scheme. Walks the file in
-  /// append order, assigns a UUID to each unchained line, and rewrites
-  /// the file in one pass. Returns the number of entries that were
-  /// assigned new lineIds (0 if the file was already migrated).
-  Future<int> migrate() async {
-    final reverseList = <T>[];
-    await for (final entity in store.readReverse()) {
-      reverseList.add(entity);
-    }
-    if (reverseList.isEmpty) return 0;
-    final forward = reverseList.reversed.toList();
-
-    final cache = <Id, String>{};
-    final result = <T>[];
-    var assigned = 0;
-    for (final entity in forward) {
-      if (entity.lineId != null) {
-        cache[entity.id] = entity.lineId!;
-        result.add(entity);
-        continue;
-      }
-      final prev = cache[entity.id];
-      final lineId = _newLineId();
-      result.add(entity.withChain(lineId: lineId, prev: prev) as T);
-      cache[entity.id] = lineId;
-      assigned++;
-    }
-    if (assigned == 0) {
-      _lineIdCache = cache;
-      return 0;
-    }
-    await store.writeAll(result);
-    _lineIdCache = cache;
-    return assigned;
-  }
 }

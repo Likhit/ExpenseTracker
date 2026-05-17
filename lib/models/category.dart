@@ -1,6 +1,7 @@
 import 'package:freezed_annotation/freezed_annotation.dart';
 import '../data/storage/jsonl_storable.dart';
 import 'ids.dart';
+import 'line_id.dart';
 import 'path_helper.dart';
 import 'transaction.dart';
 
@@ -22,8 +23,8 @@ abstract class Category
     required DateTime createdAt,
     DateTime? updatedAt,
     @Default(false) bool deleted,
-    String? lineId,
-    String? prev,
+    LineId? lineId,
+    @Default(LineId.first()) LineId prev,
   }) = _Category;
 
   factory Category.fromJson(Map<String, dynamic> json) =>
@@ -37,6 +38,6 @@ abstract class Category
       copyWith(deleted: true, updatedAt: updatedAt);
 
   @override
-  Category withChain({required String lineId, required String? prev}) =>
+  Category withChain({required LineId lineId, required LineId prev}) =>
       copyWith(lineId: lineId, prev: prev);
 }

@@ -1,22 +1,26 @@
+import '../../models/line_id.dart';
+
 /// Non-generic supertype for everything that can live in a JSONL store.
 ///
 /// Captures the storage-layer contract (timestamps, soft-delete marker,
-/// JSON encoding, soft-delete copy, and per-entity append-chain
-/// pointers) without committing to a specific id type.
+/// JSON encoding, soft-delete copy, and append-chain pointers) without
+/// committing to a specific id type.
 abstract class JsonlEntity {
   bool get deleted;
   DateTime get createdAt;
   DateTime? get updatedAt;
 
-  /// Unique id of this specific append (one per persisted version).
-  /// `null` for an in-memory entity that has never been saved.
-  String? get lineId;
+  /// Unique id of this specific append. `null` for an in-memory entity
+  /// that has never been saved; non-null ([LineId.of]) for any entity
+  /// loaded from disk. The repository assigns this on every write.
+  LineId? get lineId;
 
-  /// `lineId` of the previous persisted version of the same entity.
-  /// `null` for the first version of an entity. Together, `lineId` and
-  /// `prev` form a per-entity linked-list of edits, which Phase 1.9
-  /// (sync) walks during conflict resolution.
-  String? get prev;
+  /// Pointer to the previous append in this repository file (regardless
+  /// of entity id). [LineId.first] for the very first append into a
+  /// fresh file; [LineId.of] for every subsequent append. Together with
+  /// [lineId], all appends in a single file form one linear chain —
+  /// Phase 1.9 sync rebases over divergent tips by rewriting this field.
+  LineId get prev;
 
   Map<String, dynamic> toJson();
 
@@ -26,7 +30,7 @@ abstract class JsonlEntity {
 
   /// Returns a copy with the given chain pointers. Assigned by the
   /// repository on every append; callers should not invoke this.
-  JsonlEntity withChain({required String lineId, required String? prev});
+  JsonlEntity withChain({required LineId lineId, required LineId prev});
 }
 
 /// Adds a typed id to [JsonlEntity]. The id type is what `JsonlStore`
@@ -38,5 +42,5 @@ abstract class JsonlStorable<Id> implements JsonlEntity {
   JsonlStorable<Id> withDeleted(DateTime updatedAt);
 
   @override
-  JsonlStorable<Id> withChain({required String lineId, required String? prev});
+  JsonlStorable<Id> withChain({required LineId lineId, required LineId prev});
 }

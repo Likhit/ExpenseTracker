@@ -20,8 +20,8 @@ import '../models/validation_result.dart';
 /// `ledger.currencies`, `ledger.transactions`. All writes go through the
 /// generic `save` / `saveAll` / `delete` methods below — they validate
 /// (when the entity opts into [Validatable]) and dispatch to the right
-/// repository based on the entity type. Phase 1.6 (chain pointers) and
-/// Phase 1.8 (aggregator updates) will hook into these same methods.
+/// repository based on the entity type. Phase 1.8 (aggregator updates)
+/// will hook into these same methods.
 class LedgerService {
   final AccountRepository _accounts;
   final CategoryRepository _categories;
@@ -109,19 +109,6 @@ class LedgerService {
       default:
         throw StateError('Unsupported entity type: ${entity.runtimeType}');
     }
-  }
-
-  /// Idempotent one-shot migration that assigns chain pointers
-  /// (`lineId`/`prev`) to any pre-existing entries that lack them.
-  /// Safe to call on every app start; returns a per-repo summary of
-  /// how many entries were assigned.
-  Future<({int accounts, int categories, int currencies, int transactions})>
-      migrate() async {
-    final a = await _accounts.migrate();
-    final c = await _categories.migrate();
-    final cu = await _currencies.migrate();
-    final t = await _transactions.migrate();
-    return (accounts: a, categories: c, currencies: cu, transactions: t);
   }
 
   /// Computes balances per account per currency over every transaction
