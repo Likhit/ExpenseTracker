@@ -164,12 +164,14 @@ class LedgerService {
       buckets.putIfAbsent(k, () => []).add(ml);
     }
 
+    final children = [
+      for (final entry in buckets.entries)
+        _buildTree(entry.value, rest, entry.key),
+    ];
     return QueryResult.node(
       key: key,
-      children: [
-        for (final entry in buckets.entries)
-          _buildTree(entry.value, rest, entry.key),
-      ],
+      children: children,
+      stats: combineStats(children.map((c) => c.stats)),
     );
   }
 

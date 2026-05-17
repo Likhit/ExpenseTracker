@@ -8,6 +8,7 @@ import 'package:expense_tracker/models/transaction.dart';
 import 'package:expense_tracker/services/ledger_service.dart';
 import 'package:expense_tracker/services/query/ledger_filter.dart';
 import 'package:expense_tracker/services/query/ledger_group.dart';
+import 'package:expense_tracker/services/query/ledger_stats.dart';
 
 void main() {
   // Fixture journal exercising every query dimension:
@@ -16,6 +17,12 @@ void main() {
   //   tx-3 (2026-05-15, transfer) Chase --$2000 USD-> Fidelity +10 AAPL
   //   tx-4 (2026-05-01, expense)  Chase --€5 EUR->   Food::Snacks::Coffee
   //   tx-5 (2026-05-10, deleted expense) Chase --$100 USD-> Food::Groceries
+  //
+  // Note: today every leg requires an accountId, so the expense/income
+  // sides use placeholder accounts of type expense/income (e.g.
+  // `expenses-food`, `income-salary`). A planned phase will make
+  // accountId optional and let category-only legs act as the balancing
+  // side; the fixture will collapse accordingly.
   late Directory tempDir;
   late LedgerService ledger;
   final now = DateTime.utc(2026, 6, 1);
@@ -35,7 +42,7 @@ void main() {
               currencyCode: const CurrencyCode('USD'),
             ),
             Leg(
-              accountId: const AccountId('exp-food'),
+              accountId: const AccountId('expenses-food'),
               amount: d('50'),
               currencyCode: const CurrencyCode('USD'),
               categoryPath: const CategoryPath('Food::Groceries'),
@@ -97,7 +104,7 @@ void main() {
               currencyCode: const CurrencyCode('EUR'),
             ),
             Leg(
-              accountId: const AccountId('exp-food'),
+              accountId: const AccountId('expenses-food'),
               amount: d('5'),
               currencyCode: const CurrencyCode('EUR'),
               categoryPath: const CategoryPath('Food::Snacks::Coffee'),
@@ -117,7 +124,7 @@ void main() {
               currencyCode: const CurrencyCode('USD'),
             ),
             Leg(
-              accountId: const AccountId('exp-food'),
+              accountId: const AccountId('expenses-food'),
               amount: d('100'),
               currencyCode: const CurrencyCode('USD'),
               categoryPath: const CategoryPath('Food::Groceries'),
@@ -201,8 +208,14 @@ void main() {
       final result = await ledger.query(
         const LedgerFilter(categories: {CategoryPath('Food')}),
       );
+      // Matches the Food::Groceries leg (+$50) and the
+      // Food::Snacks::Coffee leg (+€5).
       expect(result.transactions, hasLength(2));
       expect(result.stats.count, 2);
+      expect(result.stats.sumByCurrency, {
+        const CurrencyCode('USD'): d('50'),
+        const CurrencyCode('EUR'): d('5'),
+      });
     });
 
     test('filter by category does not match an unrelated prefix string',
@@ -220,6 +233,9 @@ void main() {
       );
       expect(result.transactions, hasLength(1));
       expect(result.transactions.first.id, const TransactionId('tx-1'));
+      expect(result.stats.sumByCurrency, {
+        const CurrencyCode('USD'): d('50'),
+      });
     });
 
     test('filter by date range', () async {
@@ -232,12 +248,30 @@ void main() {
       });
     });
 
-    test('filter by transaction types', () async {
+    test('filter by transaction type: income', () async {
       final result = await ledger.query(
         const LedgerFilter(types: {TransactionType.income}),
       );
       expect(result.transactions, hasLength(1));
       expect(result.transactions.first.id, const TransactionId('tx-2'));
+      // Income tx is same-currency-balanced (salary -$1000 + Chase +$1000).
+      expect(result.stats.sumByCurrency,
+          {const CurrencyCode('USD'): d('0')});
+    });
+
+    test('filter by transaction type: expense', () async {
+      final result = await ledger.query(
+        const LedgerFilter(types: {TransactionType.expense}),
+      );
+      // tx-1 (USD groceries) and tx-4 (EUR coffee). tx-5 is deleted.
+      expect(result.transactions.map((t) => t.id), {
+        const TransactionId('tx-1'),
+        const TransactionId('tx-4'),
+      });
+      expect(result.stats.sumByCurrency, {
+        const CurrencyCode('USD'): d('0'),
+        const CurrencyCode('EUR'): d('0'),
+      });
     });
   });
 
@@ -254,7 +288,7 @@ void main() {
           byAccount.keys,
           containsAll({
             const AccountId('chase'),
-            const AccountId('exp-food'),
+            const AccountId('expenses-food'),
             const AccountId('income-salary'),
             const AccountId('fidelity'),
           }));
