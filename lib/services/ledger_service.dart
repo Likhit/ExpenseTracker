@@ -12,6 +12,10 @@ import '../models/currency.dart';
 import '../models/ids.dart';
 import '../models/transaction.dart';
 import '../models/validation_result.dart';
+import 'query/ledger_filter.dart';
+import 'query/ledger_group.dart';
+import 'query/ledger_stats.dart';
+import 'query/run_query.dart';
 
 /// Single entry point for the double-entry engine.
 ///
@@ -111,22 +115,35 @@ class LedgerService {
     }
   }
 
-  /// Computes balances per account per currency over every transaction
-  /// in the journal (including soft-deleted ones, by current design).
-  ///
-  /// Phase 1.7 will introduce a filter+group `query` API; until then,
-  /// this remains the only read-side aggregation on `LedgerService`.
-  Future<Map<AccountId, Map<CurrencyCode, Decimal>>> computeBalances() async {
+  /// Filters legs by [filter] and optionally nests them into a stats tree
+  /// along [groupBy]. Returns the matching transactions (deduplicated)
+  /// alongside a [GroupedStats] tree whose root aggregates every matched
+  /// leg and whose children partition them per dimension.
+  Future<QueryResult> query(
+    LedgerFilter filter, {
+    List<GroupDimension> groupBy = const [],
+  }) async {
     final txs = await _transactions.getAll();
+    return runQuery(txs, filter, groupBy: groupBy);
+  }
+
+  /// Convenience: balances per account per currency. Soft-deleted
+  /// transactions are excluded by default (same default as [query]).
+  Future<Map<AccountId, Map<CurrencyCode, Decimal>>> computeBalances() async {
+    final result = await query(
+      const LedgerFilter(),
+      groupBy: const [GroupDimension.byAccount(), GroupDimension.byCurrency()],
+    );
     final balances = <AccountId, Map<CurrencyCode, Decimal>>{};
-    for (final tx in txs) {
-      for (final leg in tx.legs) {
-        balances.putIfAbsent(leg.accountId, () => {}).update(
-              leg.currencyCode,
-              (existing) => existing + leg.amount,
-              ifAbsent: () => leg.amount,
-            );
+    for (final accountNode in result.stats.children) {
+      final accountKey = accountNode.key as AccountKey;
+      final perCurrency = <CurrencyCode, Decimal>{};
+      for (final currencyNode in accountNode.children) {
+        final currencyKey = currencyNode.key as CurrencyKey;
+        final sum = currencyNode.stats.sumByCurrency[currencyKey.code];
+        if (sum != null) perCurrency[currencyKey.code] = sum;
       }
+      balances[accountKey.id] = perCurrency;
     }
     return balances;
   }

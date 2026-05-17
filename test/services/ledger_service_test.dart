@@ -7,6 +7,9 @@ import 'package:expense_tracker/models/ids.dart';
 import 'package:expense_tracker/models/leg.dart';
 import 'package:expense_tracker/models/transaction.dart';
 import 'package:expense_tracker/services/ledger_service.dart';
+import 'package:expense_tracker/services/query/ledger_filter.dart';
+import 'package:expense_tracker/services/query/ledger_group.dart';
+import 'package:expense_tracker/services/query/ledger_stats.dart';
 
 void main() {
   late Directory tempDir;
@@ -294,6 +297,29 @@ void main() {
             .containsKey(const CurrencyCode('USD')),
         false,
       );
+    });
+  });
+
+  group('query', () {
+    test('routes through runQuery and returns the matching transactions',
+        () async {
+      await ledger.saveAll([
+        balancedExpense(id: 'tx-1'),
+        balancedExpense(id: 'tx-2'),
+      ]);
+
+      final result = await ledger.query(
+        const LedgerFilter(accounts: {AccountId('checking')}),
+        groupBy: const [GroupDimension.byAccount()],
+      );
+
+      expect(result.transactions, hasLength(2));
+      expect(result.stats.children, hasLength(1));
+      final accountNode = result.stats.children.first;
+      expect((accountNode.key as AccountKey).id,
+          const AccountId('checking'));
+      expect(accountNode.stats.sumByCurrency[const CurrencyCode('USD')],
+          Decimal.parse('-100.00'));
     });
   });
 }
