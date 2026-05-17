@@ -26,13 +26,19 @@ import 'query/ledger_stats.dart';
 /// (when the entity opts into [Validatable]) and dispatch to the right
 /// repository based on the entity type. Phase 1.8 (aggregator updates)
 /// will hook into these same methods.
+///
+/// Construction goes through [LedgerService.create] (async) which
+/// guarantees the built-in Expense and Income accounts exist on disk
+/// before returning. Every expense leg uses [Account.expenseId] and
+/// every income leg uses [Account.incomeId]; callers never create
+/// those accounts manually.
 class LedgerService {
   final AccountRepository _accounts;
   final CategoryRepository _categories;
   final CurrencyRepository _currencies;
   final TransactionRepository _transactions;
 
-  LedgerService({
+  LedgerService._({
     required String accountsPath,
     required String categoriesPath,
     required String currenciesPath,
@@ -41,6 +47,47 @@ class LedgerService {
         _categories = CategoryRepository(filePath: categoriesPath),
         _currencies = CurrencyRepository(filePath: currenciesPath),
         _transactions = TransactionRepository(filePath: transactionsPath);
+
+  /// Constructs a [LedgerService] over the given JSONL paths and ensures
+  /// the built-in Expense and Income accounts are present on disk
+  /// (creating them with stable ids the first time around).
+  static Future<LedgerService> create({
+    required String accountsPath,
+    required String categoriesPath,
+    required String currenciesPath,
+    required String transactionsPath,
+  }) async {
+    final ledger = LedgerService._(
+      accountsPath: accountsPath,
+      categoriesPath: categoriesPath,
+      currenciesPath: currenciesPath,
+      transactionsPath: transactionsPath,
+    );
+    await ledger._ensureBuiltinAccounts();
+    return ledger;
+  }
+
+  Future<void> _ensureBuiltinAccounts() async {
+    final existingIds = (await _accounts.getAll()).map((a) => a.id).toSet();
+    final now = DateTime.now();
+    final missing = <Account>[
+      if (!existingIds.contains(Account.expenseId))
+        Account(
+          id: Account.expenseId,
+          path: 'Expense',
+          type: AccountType.expense,
+          createdAt: now,
+        ),
+      if (!existingIds.contains(Account.incomeId))
+        Account(
+          id: Account.incomeId,
+          path: 'Income',
+          type: AccountType.income,
+          createdAt: now,
+        ),
+    ];
+    if (missing.isNotEmpty) await _accounts.saveAll(missing);
+  }
 
   ReadOnlyRepository<AccountId, Account> get accounts => _accounts;
   ReadOnlyRepository<CategoryId, Category> get categories => _categories;

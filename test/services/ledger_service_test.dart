@@ -16,7 +16,7 @@ void main() {
   late LedgerService ledger;
   final now = DateTime.utc(2026, 4, 19);
 
-  LedgerService makeLedger() => LedgerService(
+  Future<LedgerService> makeLedger() => LedgerService.create(
         accountsPath: '${tempDir.path}/accounts.jsonl',
         categoriesPath: '${tempDir.path}/categories.jsonl',
         currenciesPath: '${tempDir.path}/currencies.jsonl',
@@ -46,7 +46,7 @@ void main() {
 
   setUp(() async {
     tempDir = await Directory.systemTemp.createTemp('ledger_test_');
-    ledger = makeLedger();
+    ledger = await makeLedger();
   });
 
   tearDown(() async {
@@ -63,17 +63,28 @@ void main() {
       expect(ledger.transactions, isNotNull);
     });
 
-    test('repositories are empty on a fresh ledger', () async {
-      expect(await ledger.accounts.getAll(), isEmpty);
+    test('built-in Expense and Income accounts exist on a fresh ledger',
+        () async {
+      final accounts = await ledger.accounts.getAll();
+      final ids = accounts.map((a) => a.id).toSet();
+      expect(ids, containsAll({Account.expenseId, Account.incomeId}));
+      expect(accounts, hasLength(2));
       expect(await ledger.categories.getAll(), isEmpty);
       expect(await ledger.currencies.getAll(), isEmpty);
       expect(await ledger.transactions.getAll(), isEmpty);
     });
 
+    test('reopening a ledger does not duplicate the built-in accounts',
+        () async {
+      final reopened = await makeLedger();
+      final accounts = await reopened.accounts.getAll();
+      expect(accounts, hasLength(2));
+    });
+
     test('writes through the facade persist to disk', () async {
       await ledger.save(balancedExpense());
 
-      final reread = makeLedger();
+      final reread = await makeLedger();
       final txs = await reread.transactions.getAll();
       expect(txs, hasLength(1));
       expect(txs.first.description, 'Groceries');
@@ -91,9 +102,11 @@ void main() {
 
       await ledger.save(account);
       final accounts = await ledger.accounts.getAll();
+      final userAccounts =
+          accounts.where((a) => a.id == const AccountId('acc-1')).toList();
 
-      expect(accounts, hasLength(1));
-      expect(accounts.first.path, 'Chase::Checking');
+      expect(userAccounts, hasLength(1));
+      expect(userAccounts.first.path, 'Chase::Checking');
     });
 
     test('deleteAccount marks latest version as deleted', () async {
@@ -108,8 +121,9 @@ void main() {
       await ledger.delete(account);
 
       final accounts = await ledger.accounts.getAll();
-      expect(accounts, hasLength(1));
-      expect(accounts.first.deleted, true);
+      final acc1 =
+          accounts.firstWhere((a) => a.id == const AccountId('acc-1'));
+      expect(acc1.deleted, true);
     });
   });
 

@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:decimal/decimal.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:expense_tracker/models/account.dart';
 import 'package:expense_tracker/models/ids.dart';
 import 'package:expense_tracker/models/leg.dart';
 import 'package:expense_tracker/models/transaction.dart';
@@ -11,18 +12,18 @@ import 'package:expense_tracker/services/query/ledger_group.dart';
 import 'package:expense_tracker/services/query/ledger_stats.dart';
 
 void main() {
-  // Fixture journal exercising every query dimension:
+  // Fixture journal exercising every query dimension. The expense /
+  // income side of each transaction uses the built-in `Account.expenseId`
+  // / `Account.incomeId` accounts that `LedgerService.create` guarantees
+  // exist on disk. The Food / Salary categoryPath carries the user-facing
+  // grouping; the account only marks which side of the journal the leg
+  // belongs to.
+  //
   //   tx-1 (2026-04-19, expense)  Chase --$50 USD->  Food::Groceries
   //   tx-2 (2026-04-01, income )  Salary -$1000 USD-> Chase
   //   tx-3 (2026-05-15, transfer) Chase --$2000 USD-> Fidelity +10 AAPL
   //   tx-4 (2026-05-01, expense)  Chase --€5 EUR->   Food::Snacks::Coffee
   //   tx-5 (2026-05-10, deleted expense) Chase --$100 USD-> Food::Groceries
-  //
-  // Note: today every leg requires an accountId, so the expense/income
-  // sides use placeholder accounts of type expense/income (e.g.
-  // `expenses-food`, `income-salary`). A planned phase will make
-  // accountId optional and let category-only legs act as the balancing
-  // side; the fixture will collapse accordingly.
   late Directory tempDir;
   late LedgerService ledger;
   final now = DateTime.utc(2026, 6, 1);
@@ -42,7 +43,7 @@ void main() {
               currencyCode: const CurrencyCode('USD'),
             ),
             Leg(
-              accountId: const AccountId('expenses-food'),
+              accountId: Account.expenseId,
               amount: d('50'),
               currencyCode: const CurrencyCode('USD'),
               categoryPath: const CategoryPath('Food::Groceries'),
@@ -57,7 +58,7 @@ void main() {
           type: TransactionType.income,
           legs: [
             Leg(
-              accountId: const AccountId('income-salary'),
+              accountId: Account.incomeId,
               amount: d('-1000'),
               currencyCode: const CurrencyCode('USD'),
               categoryPath: const CategoryPath('Salary'),
@@ -104,7 +105,7 @@ void main() {
               currencyCode: const CurrencyCode('EUR'),
             ),
             Leg(
-              accountId: const AccountId('expenses-food'),
+              accountId: Account.expenseId,
               amount: d('5'),
               currencyCode: const CurrencyCode('EUR'),
               categoryPath: const CategoryPath('Food::Snacks::Coffee'),
@@ -124,7 +125,7 @@ void main() {
               currencyCode: const CurrencyCode('USD'),
             ),
             Leg(
-              accountId: const AccountId('expenses-food'),
+              accountId: Account.expenseId,
               amount: d('100'),
               currencyCode: const CurrencyCode('USD'),
               categoryPath: const CategoryPath('Food::Groceries'),
@@ -137,7 +138,7 @@ void main() {
 
   setUp(() async {
     tempDir = await Directory.systemTemp.createTemp('ledger_query_test_');
-    ledger = LedgerService(
+    ledger = await LedgerService.create(
       accountsPath: '${tempDir.path}/accounts.jsonl',
       categoriesPath: '${tempDir.path}/categories.jsonl',
       currenciesPath: '${tempDir.path}/currencies.jsonl',
@@ -288,8 +289,8 @@ void main() {
           byAccount.keys,
           containsAll({
             const AccountId('chase'),
-            const AccountId('expenses-food'),
-            const AccountId('income-salary'),
+            Account.expenseId,
+            Account.incomeId,
             const AccountId('fidelity'),
           }));
       expect(byAccount[const AccountId('chase')]!.stats.sumByCurrency, {
@@ -398,7 +399,7 @@ void main() {
     addTearDown(() async {
       if (await freshDir.exists()) await freshDir.delete(recursive: true);
     });
-    final empty = LedgerService(
+    final empty = await LedgerService.create(
       accountsPath: '${freshDir.path}/accounts.jsonl',
       categoriesPath: '${freshDir.path}/categories.jsonl',
       currenciesPath: '${freshDir.path}/currencies.jsonl',
