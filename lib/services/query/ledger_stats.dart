@@ -2,20 +2,88 @@ import 'package:decimal/decimal.dart';
 import 'package:freezed_annotation/freezed_annotation.dart';
 
 import '../../models/ids.dart';
+import '../../models/leg.dart';
 import '../../models/transaction.dart';
 import 'ledger_group.dart';
+import 'stat.dart';
 
 part 'ledger_stats.freezed.dart';
 
-/// Aggregates over a set of legs. [count] is the number of legs (not
-/// transactions); [sumByCurrency] sums each leg's signed amount by its
-/// currency.
-@freezed
-abstract class Stats with _$Stats {
-  const factory Stats({
-    @Default(0) int count,
-    @Default({}) Map<CurrencyCode, Decimal> sumByCurrency,
-  }) = _Stats;
+/// Typed container of [Stat] instances. A [Stats] tracks one entry per
+/// stat *kind* (one [CountStat], one [SumByCurrencyStat], …). The set
+/// of kinds is fixed at construction time — operations like [apply] and
+/// [combine] preserve the same shape.
+///
+/// Built-in callers reach for the convenience getters ([count],
+/// [sumByCurrency]); a custom-defined view declares its template via
+/// [Stats.of] and reads via [get].
+class Stats {
+  final Map<Type, Stat> _stats;
+
+  const Stats._(this._stats);
+
+  /// Builds a [Stats] from a list of empty-state [Stat] instances.
+  /// Duplicate kinds are de-duplicated by [Type].
+  factory Stats.of(List<Stat> stats) =>
+      Stats._({for (final s in stats) s.runtimeType: s});
+
+  /// The default template: count + per-currency sum. Used by
+  /// `LedgerService.query` when no custom template is supplied.
+  factory Stats.defaults() => Stats.of(const [
+        CountStat.empty,
+        SumByCurrencyStat.empty,
+      ]);
+
+  /// Returns a new [Stats] with [leg] folded into every contained stat.
+  Stats apply(Leg leg, Transaction tx) => Stats._({
+        for (final entry in _stats.entries)
+          entry.key: entry.value.apply(leg, tx),
+      });
+
+  /// Combines this with [other] kind-by-kind. The two must have the
+  /// same shape (same set of stat kinds).
+  Stats combine(Stats other) {
+    final result = <Type, Stat>{};
+    for (final entry in _stats.entries) {
+      final otherStat = other._stats[entry.key];
+      if (otherStat == null) {
+        throw StateError(
+            'Cannot combine Stats with different shape: missing ${entry.key}');
+      }
+      // Dynamic dispatch over the runtime type parameter — Stat<V>.combine
+      // accepts another Stat<V>; cast is checked by the variant.
+      result[entry.key] = (entry.value as dynamic).combine(otherStat);
+    }
+    return Stats._(result);
+  }
+
+  /// Typed lookup of a stat by its concrete kind.
+  T? get<T extends Stat>() => _stats[T] as T?;
+
+  /// Convenience: count from the built-in [CountStat]; 0 if not tracked.
+  int get count => get<CountStat>()?.value ?? 0;
+
+  /// Convenience: per-currency sums from the built-in [SumByCurrencyStat];
+  /// empty if not tracked.
+  Map<CurrencyCode, Decimal> get sumByCurrency =>
+      get<SumByCurrencyStat>()?.value ?? const {};
+
+  @override
+  bool operator ==(Object other) {
+    if (other is! Stats) return false;
+    if (_stats.length != other._stats.length) return false;
+    for (final entry in _stats.entries) {
+      if (entry.value != other._stats[entry.key]) return false;
+    }
+    return true;
+  }
+
+  @override
+  int get hashCode => Object.hashAllUnordered(
+      _stats.entries.map((e) => Object.hash(e.key, e.value)));
+
+  @override
+  String toString() => 'Stats(${_stats.values.toList()})';
 }
 
 /// Tree returned by `LedgerService.query`.
@@ -63,18 +131,14 @@ extension QueryResultOps on QueryResult {
       };
 }
 
-/// Sums each child's [Stats] into one. Used by `LedgerService._buildTree`
-/// when constructing a [NodeResult] so the rollup happens once.
+/// Folds every [Stats] in [all] into one via [Stats.combine]. Returns a
+/// default-template [Stats] when [all] is empty (the identity).
 Stats combineStats(Iterable<Stats> all) {
-  var count = 0;
-  final sums = <CurrencyCode, Decimal>{};
+  Stats? combined;
   for (final s in all) {
-    count += s.count;
-    s.sumByCurrency.forEach((ccy, amount) {
-      sums.update(ccy, (existing) => existing + amount, ifAbsent: () => amount);
-    });
+    combined = combined == null ? s : combined.combine(s);
   }
-  return Stats(count: count, sumByCurrency: sums);
+  return combined ?? Stats.defaults();
 }
 
 Iterable<Transaction> _dedupTransactions(Iterable<Transaction> txs) sync* {
