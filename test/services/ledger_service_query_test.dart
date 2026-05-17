@@ -12,18 +12,18 @@ import 'package:expense_tracker/services/query/ledger_group.dart';
 import 'package:expense_tracker/services/query/ledger_stats.dart';
 
 void main() {
-  // Fixture journal exercising every query dimension. The expense /
-  // income side of each transaction uses the built-in `Account.expenseId`
-  // / `Account.incomeId` accounts that `LedgerService.create` guarantees
-  // exist on disk. The Food / Salary categoryPath carries the user-facing
-  // grouping; the account only marks which side of the journal the leg
-  // belongs to.
+  // Fixture journal exercising every query dimension. The Expense /
+  // Income built-in accounts (`Account.expenseId`, `Account.incomeId`)
+  // are pure balancing sinks/sources — they never carry a categoryPath.
+  // Category lives on the asset-side leg (e.g., the Chase leg), so
+  // "Food spending" naturally reads as the Chase outflow with the Food
+  // category attached.
   //
-  //   tx-1 (2026-04-19, expense)  Chase --$50 USD->  Food::Groceries
-  //   tx-2 (2026-04-01, income )  Salary -$1000 USD-> Chase
+  //   tx-1 (2026-04-19, expense)  Chase[Food::Groceries] --$50 USD-> Expense
+  //   tx-2 (2026-04-01, income )  Income -$1000 USD-> Chase[Salary]
   //   tx-3 (2026-05-15, transfer) Chase --$2000 USD-> Fidelity +10 AAPL
-  //   tx-4 (2026-05-01, expense)  Chase --€5 EUR->   Food::Snacks::Coffee
-  //   tx-5 (2026-05-10, deleted expense) Chase --$100 USD-> Food::Groceries
+  //   tx-4 (2026-05-01, expense)  Chase[Food::Snacks::Coffee] --€5 EUR-> Expense
+  //   tx-5 (2026-05-10, deleted expense) Chase[Food::Groceries] --$100 USD-> Expense
   late Directory tempDir;
   late LedgerService ledger;
   final now = DateTime.utc(2026, 6, 1);
@@ -41,12 +41,12 @@ void main() {
               accountId: const AccountId('chase'),
               amount: d('-50'),
               currencyCode: const CurrencyCode('USD'),
+              categoryPath: const CategoryPath('Food::Groceries'),
             ),
             Leg(
               accountId: Account.expenseId,
               amount: d('50'),
               currencyCode: const CurrencyCode('USD'),
-              categoryPath: const CategoryPath('Food::Groceries'),
             ),
           ],
           createdAt: now,
@@ -61,12 +61,12 @@ void main() {
               accountId: Account.incomeId,
               amount: d('-1000'),
               currencyCode: const CurrencyCode('USD'),
-              categoryPath: const CategoryPath('Salary'),
             ),
             Leg(
               accountId: const AccountId('chase'),
               amount: d('1000'),
               currencyCode: const CurrencyCode('USD'),
+              categoryPath: const CategoryPath('Salary'),
             ),
           ],
           createdAt: now,
@@ -103,12 +103,12 @@ void main() {
               accountId: const AccountId('chase'),
               amount: d('-5'),
               currencyCode: const CurrencyCode('EUR'),
+              categoryPath: const CategoryPath('Food::Snacks::Coffee'),
             ),
             Leg(
               accountId: Account.expenseId,
               amount: d('5'),
               currencyCode: const CurrencyCode('EUR'),
-              categoryPath: const CategoryPath('Food::Snacks::Coffee'),
             ),
           ],
           createdAt: now,
@@ -123,12 +123,12 @@ void main() {
               accountId: const AccountId('chase'),
               amount: d('-100'),
               currencyCode: const CurrencyCode('USD'),
+              categoryPath: const CategoryPath('Food::Groceries'),
             ),
             Leg(
               accountId: Account.expenseId,
               amount: d('100'),
               currencyCode: const CurrencyCode('USD'),
-              categoryPath: const CategoryPath('Food::Groceries'),
             ),
           ],
           createdAt: now,
@@ -209,13 +209,13 @@ void main() {
       final result = await ledger.query(
         const LedgerFilter(categories: {CategoryPath('Food')}),
       );
-      // Matches the Food::Groceries leg (+$50) and the
-      // Food::Snacks::Coffee leg (+€5).
+      // Category lives on the Chase (asset) side. Matches the Chase
+      // outflow of tx-1 (−$50) and tx-4 (−€5).
       expect(result.transactions, hasLength(2));
       expect(result.stats.count, 2);
       expect(result.stats.sumByCurrency, {
-        const CurrencyCode('USD'): d('50'),
-        const CurrencyCode('EUR'): d('5'),
+        const CurrencyCode('USD'): d('-50'),
+        const CurrencyCode('EUR'): d('-5'),
       });
     });
 
@@ -235,7 +235,7 @@ void main() {
       expect(result.transactions, hasLength(1));
       expect(result.transactions.first.id, const TransactionId('tx-1'));
       expect(result.stats.sumByCurrency, {
-        const CurrencyCode('USD'): d('50'),
+        const CurrencyCode('USD'): d('-50'),
       });
     });
 
@@ -265,6 +265,8 @@ void main() {
         const LedgerFilter(types: {TransactionType.expense}),
       );
       // tx-1 (USD groceries) and tx-4 (EUR coffee). tx-5 is deleted.
+      // Both legs of each tx pass through, so per-currency sums are 0
+      // by the double-entry invariant.
       expect(result.transactions.map((t) => t.id), {
         const TransactionId('tx-1'),
         const TransactionId('tx-4'),
@@ -273,6 +275,67 @@ void main() {
         const CurrencyCode('USD'): d('0'),
         const CurrencyCode('EUR'): d('0'),
       });
+    });
+
+    test('excludeAccounts drops legs touching the built-in expense account',
+        () async {
+      // "All expense outflows" — keep expense-type transactions but
+      // drop the balancing Expense-account legs, leaving only the
+      // asset side.
+      final result = await ledger.query(
+        LedgerFilter(
+          types: const {TransactionType.expense},
+          excludeAccounts: {Account.expenseId},
+        ),
+      );
+      expect(result.transactions.map((t) => t.id), {
+        const TransactionId('tx-1'),
+        const TransactionId('tx-4'),
+      });
+      expect(result.stats.sumByCurrency, {
+        const CurrencyCode('USD'): d('-50'),
+        const CurrencyCode('EUR'): d('-5'),
+      });
+    });
+
+    test('excludeCurrencies drops EUR legs from an unfiltered query',
+        () async {
+      final result = await ledger.query(
+        const LedgerFilter(
+          excludeCurrencies: {CurrencyCode('EUR')},
+        ),
+      );
+      // tx-4 has only EUR legs, so it disappears entirely from
+      // transactions and the EUR sum is gone.
+      expect(
+          result.transactions.map((t) => t.id),
+          containsAll({
+            const TransactionId('tx-1'),
+            const TransactionId('tx-2'),
+            const TransactionId('tx-3'),
+          }));
+      expect(result.transactions, isNot(contains(predicate<Transaction>(
+          (t) => t.id == const TransactionId('tx-4')))));
+      expect(result.stats.sumByCurrency.containsKey(const CurrencyCode('EUR')),
+          isFalse);
+    });
+
+    test('excludeCategories drops legs under the excluded path',
+        () async {
+      // Exclude Food::Snacks — the Coffee leg (Food::Snacks::Coffee)
+      // is segment-under that prefix, so tx-4 loses its Chase leg.
+      // The Chase leg in tx-1 (Food::Groceries) is unaffected.
+      final result = await ledger.query(
+        const LedgerFilter(
+          categories: {CategoryPath('Food')},
+          excludeCategories: {CategoryPath('Food::Snacks')},
+        ),
+      );
+      expect(result.transactions.map((t) => t.id), {
+        const TransactionId('tx-1'),
+      });
+      expect(result.stats.sumByCurrency,
+          {const CurrencyCode('USD'): d('-50')});
     });
   });
 

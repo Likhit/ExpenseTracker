@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:decimal/decimal.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:expense_tracker/models/account.dart';
 import 'package:expense_tracker/models/ids.dart';
 import 'package:expense_tracker/models/leg.dart';
 import 'package:expense_tracker/models/transaction.dart';
@@ -293,6 +294,56 @@ void main() {
       ]);
 
       expect(tx.validate().isValid, true);
+    });
+
+    test('rejects a category on the built-in Expense account leg', () {
+      final tx = Transaction(
+        id: const TransactionId('tx-bad-expense-cat'),
+        date: now,
+        description: 'Groceries',
+        type: TransactionType.expense,
+        legs: [
+          Leg(
+            accountId: const AccountId('chase'),
+            amount: Decimal.parse('-50.00'),
+            currencyCode: const CurrencyCode('USD'),
+            categoryPath: const CategoryPath('Food'),
+          ),
+          Leg(
+            accountId: Account.expenseId,
+            amount: Decimal.parse('50.00'),
+            currencyCode: const CurrencyCode('USD'),
+            categoryPath: const CategoryPath('Food'),
+          ),
+        ],
+        createdAt: now,
+      );
+      expect(tx.validate().isValid, false);
+    });
+
+    test('rejects a category on the built-in Income account leg', () {
+      final tx = Transaction(
+        id: const TransactionId('tx-bad-income-cat'),
+        date: now,
+        description: 'Salary',
+        type: TransactionType.income,
+        legs: [
+          Leg(
+            accountId: Account.incomeId,
+            amount: Decimal.parse('-1000.00'),
+            currencyCode: const CurrencyCode('USD'),
+            categoryPath: const CategoryPath('Salary'),
+          ),
+          Leg(
+            accountId: const AccountId('chase'),
+            amount: Decimal.parse('1000.00'),
+            currencyCode: const CurrencyCode('USD'),
+            categoryPath: const CategoryPath('Salary'),
+          ),
+        ],
+        createdAt: now,
+      );
+      expect(tx.validate().isValid, false);
     });
   });
 }

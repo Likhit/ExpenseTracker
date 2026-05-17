@@ -2,6 +2,7 @@ import 'package:decimal/decimal.dart';
 import 'package:freezed_annotation/freezed_annotation.dart';
 
 import '../data/storage/jsonl_storable.dart';
+import 'account.dart';
 import 'ids.dart';
 import 'leg.dart';
 import 'line_id.dart';
@@ -57,6 +58,20 @@ abstract class Transaction
   ValidationResult validate() {
     if (legs.length < 2) {
       return ValidationResult.error('Transaction must have at least 2 legs');
+    }
+
+    // The built-in Expense and Income accounts are pure balancing
+    // sinks/sources — they never carry a categoryPath. Category lives
+    // on the asset-side leg (the side the user actually moved money
+    // in/out of).
+    for (final leg in legs) {
+      final isBuiltinSink = leg.accountId == Account.expenseId ||
+          leg.accountId == Account.incomeId;
+      if (isBuiltinSink && leg.categoryPath != null) {
+        return ValidationResult.error(
+            'Legs on the built-in Expense or Income account must not carry a '
+            'categoryPath (account: ${leg.accountId.value})');
+      }
     }
 
     final byCurrency = <CurrencyCode, Decimal>{};
