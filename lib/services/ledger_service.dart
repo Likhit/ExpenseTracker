@@ -16,6 +16,7 @@ import '../models/validation_result.dart';
 import 'query/ledger_filter.dart';
 import 'query/ledger_group.dart';
 import 'query/ledger_stats.dart';
+import 'views/ledger_view.dart';
 
 /// Single entry point for the double-entry engine.
 ///
@@ -38,34 +39,72 @@ class LedgerService {
   final CurrencyRepository _currencies;
   final TransactionRepository _transactions;
 
+  /// Named maintained views. Order is registration order; lookups go
+  /// through [_viewsByName] for O(1) access.
+  final List<LedgerViewState> _viewStates;
+  final Map<String, LedgerViewState> _viewsByName;
+
   LedgerService._({
     required String accountsPath,
     required String categoriesPath,
     required String currenciesPath,
     required String transactionsPath,
+    required List<LedgerView> views,
   })  : _accounts = AccountRepository(filePath: accountsPath),
         _categories = CategoryRepository(filePath: categoriesPath),
         _currencies = CurrencyRepository(filePath: currenciesPath),
-        _transactions = TransactionRepository(filePath: transactionsPath);
+        _transactions = TransactionRepository(filePath: transactionsPath),
+        _viewStates = [for (final v in views) LedgerViewState(v)],
+        _viewsByName = {} {
+    for (final state in _viewStates) {
+      if (_viewsByName.containsKey(state.view.name)) {
+        throw ArgumentError(
+            'Duplicate view name: "${state.view.name}"');
+      }
+      _viewsByName[state.view.name] = state;
+    }
+  }
 
-  /// Constructs a [LedgerService] over the given JSONL paths and ensures
-  /// the built-in Expense and Income accounts are present on disk
-  /// (creating them with stable ids the first time around).
+  /// Constructs a [LedgerService] over the given JSONL paths. Ensures
+  /// the built-in Expense and Income accounts are present on disk and
+  /// seeds every registered view by replaying the transaction journal
+  /// once before returning.
   static Future<LedgerService> create({
     required String accountsPath,
     required String categoriesPath,
     required String currenciesPath,
     required String transactionsPath,
+    List<LedgerView> views = const [],
   }) async {
     final ledger = LedgerService._(
       accountsPath: accountsPath,
       categoriesPath: categoriesPath,
       currenciesPath: currenciesPath,
       transactionsPath: transactionsPath,
+      views: views,
     );
     await ledger._ensureBuiltinAccounts();
+    await ledger._seedViews();
     return ledger;
   }
+
+  Future<void> _seedViews() async {
+    if (_viewStates.isEmpty) return;
+    final txs = await _transactions.getAll();
+    for (final state in _viewStates) {
+      state.seed(txs);
+    }
+  }
+
+  /// Current snapshot of the named view, or null if no such view is
+  /// registered. The returned [QueryResult] is immutable; subsequent
+  /// view updates do not mutate it.
+  QueryResult? viewResult(String name) => _viewsByName[name]?.current;
+
+  /// Re-seeds every registered view by replaying the transaction
+  /// journal from scratch. Use after operations that bypass the
+  /// push-update path (Phase 1.9 sync merge will need this).
+  Future<void> rebuildViews() => _seedViews();
 
   Future<void> _ensureBuiltinAccounts() async {
     final existingIds = (await _accounts.getAll()).map((a) => a.id).toSet();
@@ -97,7 +136,9 @@ class LedgerService {
 
   /// Validates [entity] (when it implements [Validatable]) and persists
   /// it to the matching repository. Returns the validation result; on
-  /// failure, no write happens.
+  /// failure, no write happens. After a successful [Transaction] save,
+  /// every registered view receives the (pre-save, post-save) pair so
+  /// it can update its maintained tree.
   Future<ValidationResult> save<T extends JsonlEntity>(T entity) async {
     if (entity is Validatable) {
       final result = (entity as Validatable).validate();
@@ -111,7 +152,9 @@ class LedgerService {
       case Currency cur:
         await _currencies.save(cur);
       case Transaction t:
+        final old = await _transactions.get(t.id);
         await _transactions.save(t);
+        _notifyViews(old, t);
       default:
         throw StateError('Unsupported entity type: ${entity.runtimeType}');
     }
@@ -138,7 +181,17 @@ class LedgerService {
       case Currency _:
         await _currencies.saveAll(entities.cast<Currency>());
       case Transaction _:
-        await _transactions.saveAll(entities.cast<Transaction>());
+        final txs = entities.cast<Transaction>();
+        // Snapshot pre-save state for every id up front so each view
+        // gets a consistent (old, new) pair even when a batch touches
+        // the same id more than once.
+        final olds = <Transaction?>[
+          for (final t in txs) await _transactions.get(t.id),
+        ];
+        await _transactions.saveAll(txs);
+        for (var i = 0; i < txs.length; i++) {
+          _notifyViews(olds[i], txs[i]);
+        }
       default:
         throw StateError(
             'Unsupported entity type: ${entities.first.runtimeType}');
@@ -156,9 +209,17 @@ class LedgerService {
       case Currency cur:
         await _currencies.delete(cur);
       case Transaction t:
-        await _transactions.delete(t);
+        final old = await _transactions.get(t.id);
+        final deleted = await _transactions.delete(t);
+        _notifyViews(old, deleted);
       default:
         throw StateError('Unsupported entity type: ${entity.runtimeType}');
+    }
+  }
+
+  void _notifyViews(Transaction? old, Transaction newVersion) {
+    for (final state in _viewStates) {
+      state.applySave(old, newVersion);
     }
   }
 

@@ -24,6 +24,12 @@ abstract interface class ReadOnlyRepository<Id,
 
   /// Eager convenience wrapper around [streamAll].
   Future<List<T>> getAll();
+
+  /// Returns the latest version of the entity with [id], or null if no
+  /// version was ever appended. Used by `LedgerService` to diff
+  /// pre-save state against the just-saved version when pushing
+  /// updates to maintained views.
+  Future<T?> get(Id id);
 }
 
 /// Base repository over a [JsonlStore]. Dedups by id when reading and
@@ -82,6 +88,16 @@ class Repository<Id, T extends JsonlStorable<Id>>
 
   @override
   Future<List<T>> getAll() => streamAll().toList();
+
+  @override
+  Future<T?> get(Id id) async {
+    await for (final entity in store.readReverse()) {
+      // readReverse yields newest-first; the first match is the latest
+      // version of [id]. Bail as soon as we see it.
+      if (entity.id == id) return entity;
+    }
+    return null;
+  }
 
   Future<T> save(T entity) async {
     final prev = await _ensureTip();
