@@ -20,8 +20,8 @@ import '../models/validation_result.dart';
 /// `ledger.currencies`, `ledger.transactions`. All writes go through the
 /// generic `save` / `saveAll` / `delete` methods below — they validate
 /// (when the entity opts into [Validatable]) and dispatch to the right
-/// repository based on the entity type. Phase 1.6 (chain pointers) and
-/// Phase 1.8 (aggregator updates) will hook into these same methods.
+/// repository based on the entity type. Phase 1.8 (aggregator updates)
+/// will hook into these same methods.
 class LedgerService {
   final AccountRepository _accounts;
   final CategoryRepository _categories;

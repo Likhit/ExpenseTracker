@@ -1,6 +1,7 @@
 import 'package:freezed_annotation/freezed_annotation.dart';
 import '../data/storage/jsonl_storable.dart';
 import 'ids.dart';
+import 'line_id.dart';
 
 part 'currency.freezed.dart';
 part 'currency.g.dart';
@@ -27,6 +28,8 @@ abstract class Currency
     required DateTime createdAt,
     DateTime? updatedAt,
     @Default(false) bool deleted,
+    LineId? lineId,
+    @Default(LineId.first()) LineId prev,
   }) = _Currency;
 
   factory Currency.fromJson(Map<String, dynamic> json) =>
@@ -35,4 +38,8 @@ abstract class Currency
   @override
   Currency withDeleted(DateTime updatedAt) =>
       copyWith(deleted: true, updatedAt: updatedAt);
+
+  @override
+  Currency withChain({required LineId lineId, required LineId prev}) =>
+      copyWith(lineId: lineId, prev: prev);
 }
