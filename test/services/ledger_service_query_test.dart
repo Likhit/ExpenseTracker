@@ -156,12 +156,12 @@ void main() {
       final result = await ledger.query(const LedgerFilter());
 
       expect(result.transactions, hasLength(4));
-      expect(result.stats.stats.count, 8);
-      expect(result.stats.stats.sumByCurrency[const CurrencyCode('USD')],
+      expect(result.stats.count, 8);
+      expect(result.stats.sumByCurrency[const CurrencyCode('USD')],
           d('-2000'));
       expect(
-          result.stats.stats.sumByCurrency[const CurrencyCode('EUR')], d('0'));
-      expect(result.stats.stats.sumByCurrency[const CurrencyCode('AAPL')],
+          result.stats.sumByCurrency[const CurrencyCode('EUR')], d('0'));
+      expect(result.stats.sumByCurrency[const CurrencyCode('AAPL')],
           d('10'));
     });
 
@@ -169,7 +169,7 @@ void main() {
       final result =
           await ledger.query(const LedgerFilter(includeDeleted: true));
       expect(result.transactions, hasLength(5));
-      expect(result.stats.stats.count, 10);
+      expect(result.stats.count, 10);
     });
 
     test('filter by accounts keeps only legs touching those accounts',
@@ -178,11 +178,11 @@ void main() {
         const LedgerFilter(accounts: {AccountId('chase')}),
       );
       expect(result.transactions, hasLength(4));
-      expect(result.stats.stats.count, 4);
-      expect(result.stats.stats.sumByCurrency[const CurrencyCode('USD')],
+      expect(result.stats.count, 4);
+      expect(result.stats.sumByCurrency[const CurrencyCode('USD')],
           d('-1050'));
       expect(
-          result.stats.stats.sumByCurrency[const CurrencyCode('EUR')], d('-5'));
+          result.stats.sumByCurrency[const CurrencyCode('EUR')], d('-5'));
     });
 
     test('filter by currency excludes other-currency legs from sums',
@@ -191,7 +191,7 @@ void main() {
         const LedgerFilter(currencies: {CurrencyCode('EUR')}),
       );
       expect(result.transactions, hasLength(1));
-      expect(result.stats.stats.sumByCurrency, {
+      expect(result.stats.sumByCurrency, {
         const CurrencyCode('EUR'): d('0'),
       });
     });
@@ -202,7 +202,7 @@ void main() {
         const LedgerFilter(categories: {CategoryPath('Food')}),
       );
       expect(result.transactions, hasLength(2));
-      expect(result.stats.stats.count, 2);
+      expect(result.stats.count, 2);
     });
 
     test('filter by category does not match an unrelated prefix string',
@@ -211,7 +211,7 @@ void main() {
         const LedgerFilter(categories: {CategoryPath('Fo')}),
       );
       expect(result.transactions, isEmpty);
-      expect(result.stats.stats.count, 0);
+      expect(result.stats.count, 0);
     });
 
     test('filter by category exact match still works', () async {
@@ -248,7 +248,7 @@ void main() {
         groupBy: const [GroupDimension.byAccount()],
       );
       final byAccount = {
-        for (final c in result.stats.children) (c.key as AccountKey).id: c,
+        for (final c in result.children) (c.key as AccountKey).id: c,
       };
       expect(
           byAccount.keys,
@@ -270,7 +270,7 @@ void main() {
         groupBy: const [GroupDimension.byCurrency()],
       );
       final byCcy = {
-        for (final c in result.stats.children) (c.key as CurrencyKey).code: c,
+        for (final c in result.children) (c.key as CurrencyKey).code: c,
       };
       expect(byCcy[const CurrencyCode('USD')]!.stats.sumByCurrency,
           {const CurrencyCode('USD'): d('-2000')});
@@ -283,7 +283,7 @@ void main() {
         const LedgerFilter(),
         groupBy: const [GroupDimension.byCategory()],
       );
-      final keys = result.stats.children.map((c) => c.key).toSet();
+      final keys = result.children.map((c) => c.key).toSet();
       expect(keys, contains(const GroupKey.category(CategoryPath('Food'))));
       expect(keys, contains(const GroupKey.category(CategoryPath('Salary'))));
       expect(keys, contains(const GroupKey.none()));
@@ -294,7 +294,7 @@ void main() {
         const LedgerFilter(),
         groupBy: const [GroupDimension.byCategory(depth: 2)],
       );
-      final keys = result.stats.children.map((c) => c.key).toSet();
+      final keys = result.children.map((c) => c.key).toSet();
       expect(keys,
           contains(const GroupKey.category(CategoryPath('Food::Groceries'))));
       expect(keys,
@@ -306,10 +306,36 @@ void main() {
         const LedgerFilter(),
         groupBy: const [GroupDimension.byTime(TimeBucket.month)],
       );
-      final keys = result.stats.children
+      final keys = result.children
           .map((c) => (c.key as TimeKey).bucketStart)
           .toSet();
       expect(keys, {DateTime.utc(2026, 4, 1), DateTime.utc(2026, 5, 1)});
+    });
+
+    test('intermediate node derives stats and transactions from children',
+        () async {
+      final result = await ledger.query(
+        const LedgerFilter(),
+        groupBy: const [
+          GroupDimension.byAccount(),
+          GroupDimension.byCurrency(),
+        ],
+      );
+      final chase = result.children.firstWhere(
+          (c) => (c.key as AccountKey).id == const AccountId('chase'));
+      // Chase appears as a leg in tx-1, tx-2, tx-3, tx-4 — deduped.
+      expect(chase.transactions.map((t) => t.id).toSet(), {
+        const TransactionId('tx-1'),
+        const TransactionId('tx-2'),
+        const TransactionId('tx-3'),
+        const TransactionId('tx-4'),
+      });
+      // Chase total = sum of USD and EUR leaves.
+      expect(chase.stats.count, 4);
+      expect(chase.stats.sumByCurrency, {
+        const CurrencyCode('USD'): d('-1050'),
+        const CurrencyCode('EUR'): d('-5'),
+      });
     });
 
     test('compose: group by account then currency', () async {
@@ -320,7 +346,7 @@ void main() {
           GroupDimension.byCurrency(),
         ],
       );
-      final chase = result.stats.children.firstWhere(
+      final chase = result.children.firstWhere(
           (c) => (c.key as AccountKey).id == const AccountId('chase'));
       final ccyKeys =
           chase.children.map((c) => (c.key as CurrencyKey).code).toSet();
@@ -346,7 +372,7 @@ void main() {
     );
     final result = await empty.query(const LedgerFilter());
     expect(result.transactions, isEmpty);
-    expect(result.stats.children, isEmpty);
-    expect(result.stats.stats.count, 0);
+    expect(result.children, isEmpty);
+    expect(result.stats.count, 0);
   });
 }

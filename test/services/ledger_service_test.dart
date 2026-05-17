@@ -313,11 +313,11 @@ void main() {
       );
 
       expect(result.transactions, hasLength(2));
-      expect(result.stats.children, hasLength(1));
-      final accountNode = result.stats.children.first;
-      expect((accountNode.key as AccountKey).id,
+      expect(result.children, hasLength(1));
+      final accountLeaf = result.children.first;
+      expect((accountLeaf.key as AccountKey).id,
           const AccountId('checking'));
-      expect(accountNode.stats.sumByCurrency[const CurrencyCode('USD')],
+      expect(accountLeaf.stats.sumByCurrency[const CurrencyCode('USD')],
           Decimal.parse('-100.00'));
     });
   });

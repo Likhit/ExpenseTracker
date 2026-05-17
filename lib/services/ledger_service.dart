@@ -115,62 +115,62 @@ class LedgerService {
     }
   }
 
-  /// Filters legs by [filter] and optionally nests them into a stats tree
-  /// along [groupBy]. Returns the matching transactions (deduplicated)
-  /// alongside a [GroupedStats] tree whose root aggregates every matched
-  /// leg and whose children partition them per dimension.
+  /// Filters legs by [filter] and optionally nests them along [groupBy]
+  /// into a [QueryResult] tree. With no `groupBy`, the result is a single
+  /// [LeafResult] holding every matching transaction and the total stats.
+  /// With `groupBy`, the result is a [NodeResult] rooted at `GroupKey.none()`
+  /// whose subtree partitions the matching legs along each dimension —
+  /// leaves carry the per-bucket transactions and stats; intermediate
+  /// nodes derive theirs from the subtree.
   ///
   /// Consumes the transaction repo as a stream so non-matching rows are
   /// discarded without ever sitting in memory; only legs that survive
-  /// [filter] are held to build the [GroupedStats] tree.
+  /// [filter] are held while the tree is built.
   Future<QueryResult> query(
     LedgerFilter filter, {
     List<GroupDimension> groupBy = const [],
   }) async {
-    final matchedTxs = <Transaction>[];
     final matchedLegs = <({Leg leg, Transaction tx})>[];
-
     await for (final tx in _transactions.streamAll()) {
       final legs = filter.apply(tx);
       if (legs.isEmpty) continue;
-      matchedTxs.add(tx);
       for (final leg in legs) {
         matchedLegs.add((leg: leg, tx: tx));
       }
     }
-
-    final stats = GroupedStats(
-      key: const GroupKey.none(),
-      stats: _statsOf(matchedLegs),
-      children: _buildChildren(matchedLegs, groupBy),
-    );
-    return QueryResult(transactions: matchedTxs, stats: stats);
+    return _buildTree(matchedLegs, groupBy, const GroupKey.none());
   }
 
-  List<GroupedStats> _buildChildren(
+  QueryResult _buildTree(
     List<({Leg leg, Transaction tx})> legs,
-    List<GroupDimension> groupBy,
+    List<GroupDimension> remaining,
+    GroupKey key,
   ) {
-    if (groupBy.isEmpty || legs.isEmpty) return const [];
-    final dim = groupBy.first;
-    final rest = groupBy.sublist(1);
+    if (remaining.isEmpty) {
+      return QueryResult.leaf(
+        key: key,
+        transactions: _uniqueTxs(legs),
+        stats: _statsOf(legs),
+      );
+    }
+    final dim = remaining.first;
+    final rest = remaining.sublist(1);
 
     // Insertion-ordered: groups appear in the order their first leg was
     // encountered. Deterministic given the input stream order.
     final buckets = <GroupKey, List<({Leg leg, Transaction tx})>>{};
     for (final ml in legs) {
-      final key = dim.keyFor(ml.leg, ml.tx);
-      buckets.putIfAbsent(key, () => []).add(ml);
+      final k = dim.keyFor(ml.leg, ml.tx);
+      buckets.putIfAbsent(k, () => []).add(ml);
     }
 
-    return [
-      for (final entry in buckets.entries)
-        GroupedStats(
-          key: entry.key,
-          stats: _statsOf(entry.value),
-          children: _buildChildren(entry.value, rest),
-        ),
-    ];
+    return QueryResult.node(
+      key: key,
+      children: [
+        for (final entry in buckets.entries)
+          _buildTree(entry.value, rest, entry.key),
+      ],
+    );
   }
 
   Stats _statsOf(List<({Leg leg, Transaction tx})> legs) {
@@ -185,6 +185,15 @@ class LedgerService {
     return Stats(count: legs.length, sumByCurrency: sums);
   }
 
+  List<Transaction> _uniqueTxs(List<({Leg leg, Transaction tx})> legs) {
+    final seen = <TransactionId>{};
+    final result = <Transaction>[];
+    for (final ml in legs) {
+      if (seen.add(ml.tx.id)) result.add(ml.tx);
+    }
+    return result;
+  }
+
   /// Convenience: balances per account per currency. Soft-deleted
   /// transactions are excluded by default (same default as [query]).
   Future<Map<AccountId, Map<CurrencyCode, Decimal>>> computeBalances() async {
@@ -193,12 +202,12 @@ class LedgerService {
       groupBy: const [GroupDimension.byAccount(), GroupDimension.byCurrency()],
     );
     final balances = <AccountId, Map<CurrencyCode, Decimal>>{};
-    for (final accountNode in result.stats.children) {
+    for (final accountNode in result.children) {
       final accountKey = accountNode.key as AccountKey;
       final perCurrency = <CurrencyCode, Decimal>{};
-      for (final currencyNode in accountNode.children) {
-        final currencyKey = currencyNode.key as CurrencyKey;
-        final sum = currencyNode.stats.sumByCurrency[currencyKey.code];
+      for (final currencyLeaf in accountNode.children) {
+        final currencyKey = currencyLeaf.key as CurrencyKey;
+        final sum = currencyLeaf.stats.sumByCurrency[currencyKey.code];
         if (sum != null) perCurrency[currencyKey.code] = sum;
       }
       balances[accountKey.id] = perCurrency;
