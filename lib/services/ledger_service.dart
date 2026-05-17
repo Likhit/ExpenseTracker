@@ -223,15 +223,11 @@ class LedgerService {
   }
 
   Stats _statsOf(List<({Leg leg, Transaction tx})> legs) {
-    final sums = <CurrencyCode, Decimal>{};
+    var stats = Stats.defaults();
     for (final ml in legs) {
-      sums.update(
-        ml.leg.currencyCode,
-        (existing) => existing + ml.leg.amount,
-        ifAbsent: () => ml.leg.amount,
-      );
+      stats = stats.apply(ml.leg, ml.tx);
     }
-    return Stats(count: legs.length, sumByCurrency: sums);
+    return stats;
   }
 
   List<Transaction> _uniqueTxs(List<({Leg leg, Transaction tx})> legs) {

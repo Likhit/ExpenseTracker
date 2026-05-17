@@ -176,8 +176,14 @@ void main() {
     test('includeDeleted brings back the cancelled transaction', () async {
       final result =
           await ledger.query(const LedgerFilter(includeDeleted: true));
+      // tx-5 (soft-deleted) is now visible in transactions. Stats treat
+      // deleted-tx legs as *negative* contributions (the apply
+      // convention that lets incremental updates revert by re-applying
+      // with deleted flipped), so tx-5's two legs subtract from count
+      // (8 active − 2 deleted = 6). Signed sums are unchanged because
+      // tx-5 is same-currency balanced.
       expect(result.transactions, hasLength(5));
-      expect(result.stats.count, 10);
+      expect(result.stats.count, 6);
     });
 
     test('filter by accounts keeps only legs touching those accounts',
