@@ -2,6 +2,7 @@ import 'package:freezed_annotation/freezed_annotation.dart';
 
 import '../../models/ids.dart';
 import '../../models/leg.dart';
+import '../../models/path_helper.dart';
 import '../../models/transaction.dart';
 
 part 'ledger_filter.freezed.dart';
@@ -54,16 +55,8 @@ abstract class LedgerFilter with _$LedgerFilter {
     return true;
   }
 
-  /// Segment-aware: `Food` matches `Food::Snacks::Cake` but not `Foo` or
-  /// `Foodie`. A null leg category never matches a category filter.
   bool _matchesCategory(CategoryPath? legCategory) {
     if (legCategory == null) return false;
-    final legPath = legCategory.value;
-    for (final filterCat in categories!) {
-      final filterPath = filterCat.value;
-      if (legPath == filterPath) return true;
-      if (legPath.startsWith('$filterPath::')) return true;
-    }
-    return false;
+    return categories!.any(legCategory.matches);
   }
 }

@@ -16,7 +16,13 @@ LineId _newLineId() => LineId.of(_uuid.v4());
 /// be enforced uniformly.
 abstract interface class ReadOnlyRepository<Id,
     T extends JsonlStorable<Id>> {
-  /// Returns the latest version of every entity. Includes soft-deleted ones.
+  /// Lazy newest-first stream of every entity (one per id, latest
+  /// version). Includes soft-deleted ones. Lets callers (notably the
+  /// query engine) reject non-matching rows without materializing the
+  /// whole journal.
+  Stream<T> streamAll();
+
+  /// Eager convenience wrapper around [streamAll].
   Future<List<T>> getAll();
 }
 
@@ -67,16 +73,15 @@ class Repository<Id, T extends JsonlStorable<Id>>
   }
 
   @override
-  Future<List<T>> getAll() async {
+  Stream<T> streamAll() async* {
     final seen = <Id>{};
-    final result = <T>[];
     await for (final entity in store.readReverse()) {
-      if (seen.add(entity.id)) {
-        result.add(entity);
-      }
+      if (seen.add(entity.id)) yield entity;
     }
-    return result;
   }
+
+  @override
+  Future<List<T>> getAll() => streamAll().toList();
 
   Future<T> save(T entity) async {
     final prev = await _ensureTip();

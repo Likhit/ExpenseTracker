@@ -2,6 +2,7 @@ import 'package:freezed_annotation/freezed_annotation.dart';
 
 import '../../models/ids.dart';
 import '../../models/leg.dart';
+import '../../models/path_helper.dart';
 import '../../models/transaction.dart';
 
 part 'ledger_group.freezed.dart';
@@ -43,11 +44,7 @@ sealed class GroupDimension with _$GroupDimension {
 
   GroupKey _categoryKey(CategoryPath? path, int depth) {
     if (path == null) return const GroupKey.none();
-    final segments = path.value.split('::');
-    if (segments.length <= depth) return GroupKey.category(path);
-    return GroupKey.category(
-      CategoryPath(segments.take(depth).join('::')),
-    );
+    return GroupKey.category(path.truncated(depth));
   }
 
   DateTime _bucketStart(DateTime d, TimeBucket b) {

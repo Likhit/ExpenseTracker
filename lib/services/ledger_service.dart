@@ -10,12 +10,12 @@ import '../models/account.dart';
 import '../models/category.dart';
 import '../models/currency.dart';
 import '../models/ids.dart';
+import '../models/leg.dart';
 import '../models/transaction.dart';
 import '../models/validation_result.dart';
 import 'query/ledger_filter.dart';
 import 'query/ledger_group.dart';
 import 'query/ledger_stats.dart';
-import 'query/run_query.dart';
 
 /// Single entry point for the double-entry engine.
 ///
@@ -119,12 +119,70 @@ class LedgerService {
   /// along [groupBy]. Returns the matching transactions (deduplicated)
   /// alongside a [GroupedStats] tree whose root aggregates every matched
   /// leg and whose children partition them per dimension.
+  ///
+  /// Consumes the transaction repo as a stream so non-matching rows are
+  /// discarded without ever sitting in memory; only legs that survive
+  /// [filter] are held to build the [GroupedStats] tree.
   Future<QueryResult> query(
     LedgerFilter filter, {
     List<GroupDimension> groupBy = const [],
   }) async {
-    final txs = await _transactions.getAll();
-    return runQuery(txs, filter, groupBy: groupBy);
+    final matchedTxs = <Transaction>[];
+    final matchedLegs = <({Leg leg, Transaction tx})>[];
+
+    await for (final tx in _transactions.streamAll()) {
+      final legs = filter.apply(tx);
+      if (legs.isEmpty) continue;
+      matchedTxs.add(tx);
+      for (final leg in legs) {
+        matchedLegs.add((leg: leg, tx: tx));
+      }
+    }
+
+    final stats = GroupedStats(
+      key: const GroupKey.none(),
+      stats: _statsOf(matchedLegs),
+      children: _buildChildren(matchedLegs, groupBy),
+    );
+    return QueryResult(transactions: matchedTxs, stats: stats);
+  }
+
+  List<GroupedStats> _buildChildren(
+    List<({Leg leg, Transaction tx})> legs,
+    List<GroupDimension> groupBy,
+  ) {
+    if (groupBy.isEmpty || legs.isEmpty) return const [];
+    final dim = groupBy.first;
+    final rest = groupBy.sublist(1);
+
+    // Insertion-ordered: groups appear in the order their first leg was
+    // encountered. Deterministic given the input stream order.
+    final buckets = <GroupKey, List<({Leg leg, Transaction tx})>>{};
+    for (final ml in legs) {
+      final key = dim.keyFor(ml.leg, ml.tx);
+      buckets.putIfAbsent(key, () => []).add(ml);
+    }
+
+    return [
+      for (final entry in buckets.entries)
+        GroupedStats(
+          key: entry.key,
+          stats: _statsOf(entry.value),
+          children: _buildChildren(entry.value, rest),
+        ),
+    ];
+  }
+
+  Stats _statsOf(List<({Leg leg, Transaction tx})> legs) {
+    final sums = <CurrencyCode, Decimal>{};
+    for (final ml in legs) {
+      sums.update(
+        ml.leg.currencyCode,
+        (existing) => existing + ml.leg.amount,
+        ifAbsent: () => ml.leg.amount,
+      );
+    }
+    return Stats(count: legs.length, sumByCurrency: sums);
   }
 
   /// Convenience: balances per account per currency. Soft-deleted
