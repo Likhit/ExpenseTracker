@@ -16,18 +16,17 @@ import '../models/validation_result.dart';
 import 'query/ledger_filter.dart';
 import 'query/ledger_group.dart';
 import 'query/ledger_stats.dart';
-import 'query/transaction_source.dart';
-import 'views/ledger_view.dart';
+import 'query/ledger_view.dart';
 
 /// Single entry point for the double-entry engine.
 ///
 /// Owns the four append-only JSONL repositories internally. External
 /// callers get read-only access via `ledger.accounts`, `ledger.categories`,
 /// `ledger.currencies`, `ledger.transactions`. All writes go through the
-/// generic `save` / `saveAll` / `delete` methods below — they validate
-/// (when the entity opts into [Validatable]) and dispatch to the right
-/// repository based on the entity type. Phase 1.8 (aggregator updates)
-/// will hook into these same methods.
+/// generic `save` / `delete` methods below — they validate (when the entity
+/// opts into [Validatable]) and dispatch to the right repository based on the
+/// entity type. After a transaction write, every registered [LedgerView] is
+/// updated with the (pre-save, post-save) pair.
 ///
 /// Construction goes through [LedgerService.create] (async) which
 /// guarantees the built-in Expense and Income accounts exist on disk
@@ -40,9 +39,7 @@ class LedgerService {
   final CurrencyRepository _currencies;
   final TransactionRepository _transactions;
 
-  /// Named maintained views. Order is registration order; lookups go
-  /// through [_viewsByName] for O(1) access.
-  final List<LedgerView> _views = [];
+  /// Named maintained views, keyed by name for O(1) lookup.
   final Map<String, LedgerView> _viewsByName = {};
 
   LedgerService._({
@@ -94,7 +91,6 @@ class LedgerService {
       template: template,
     );
     view.seed(await _transactions.getAll());
-    _views.add(view);
     _viewsByName[name] = view;
     return view;
   }
@@ -102,17 +98,6 @@ class LedgerService {
   /// The named maintained view, or null if no such view is registered.
   /// Read its current immutable tree via [LedgerView.result].
   LedgerView? viewResult(String name) => _viewsByName[name];
-
-  /// Re-seeds every registered view by replaying the transaction journal
-  /// from scratch. Use after operations that bypass the push-update path
-  /// (Phase 1.9 sync merge will need this).
-  Future<void> rebuildViews() async {
-    if (_views.isEmpty) return;
-    final txs = await _transactions.getAll();
-    for (final view in _views) {
-      view.seed(txs);
-    }
-  }
 
   Future<void> _ensureBuiltinAccounts() async {
     final existingIds = (await _accounts.getAll()).map((a) => a.id).toSet();
@@ -133,7 +118,9 @@ class LedgerService {
           createdAt: now,
         ),
     ];
-    if (missing.isNotEmpty) await _accounts.saveAll(missing);
+    for (final account in missing) {
+      await _accounts.save(account);
+    }
   }
 
   ReadOnlyRepository<AccountId, Account> get accounts => _accounts;
@@ -169,44 +156,6 @@ class LedgerService {
     return ValidationResult.ok();
   }
 
-  /// Validates every entity first; if any is invalid, returns the first
-  /// failure and writes nothing. Otherwise persists all to the matching
-  /// repository. The list is assumed to be homogeneous in entity type.
-  Future<ValidationResult> saveAll<T extends JsonlEntity>(
-      List<T> entities) async {
-    if (entities.isEmpty) return ValidationResult.ok();
-    for (final e in entities) {
-      if (e is Validatable) {
-        final result = (e as Validatable).validate();
-        if (!result.isValid) return result;
-      }
-    }
-    switch (entities.first) {
-      case Account _:
-        await _accounts.saveAll(entities.cast<Account>());
-      case Category _:
-        await _categories.saveAll(entities.cast<Category>());
-      case Currency _:
-        await _currencies.saveAll(entities.cast<Currency>());
-      case Transaction _:
-        final txs = entities.cast<Transaction>();
-        // Snapshot pre-save state for every id up front so each view
-        // gets a consistent (old, new) pair even when a batch touches
-        // the same id more than once.
-        final olds = <Transaction?>[
-          for (final t in txs) await _transactions.get(t.id),
-        ];
-        await _transactions.saveAll(txs);
-        for (var i = 0; i < txs.length; i++) {
-          _notifyViews(olds[i], txs[i]);
-        }
-      default:
-        throw StateError(
-            'Unsupported entity type: ${entities.first.runtimeType}');
-    }
-    return ValidationResult.ok();
-  }
-
   /// Soft-deletes [entity] by appending a new version with `deleted: true`.
   Future<void> delete<T extends JsonlEntity>(T entity) async {
     switch (entity) {
@@ -226,7 +175,7 @@ class LedgerService {
   }
 
   void _notifyViews(Transaction? old, Transaction newVersion) {
-    for (final view in _views) {
+    for (final view in _viewsByName.values) {
       view.applySave(old, newVersion);
     }
   }
@@ -265,7 +214,7 @@ class LedgerService {
     if (remaining.isEmpty) {
       return QueryResult.leaf(
         key: key,
-        source: TransactionSource.materialized(_uniqueTxs(legs)),
+        source: TransactionSource(materialized: _uniqueTxs(legs)),
         stats: _statsOf(legs),
       );
     }

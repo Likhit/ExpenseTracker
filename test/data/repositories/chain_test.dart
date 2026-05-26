@@ -77,19 +77,6 @@ void main() {
       expect(c.prev, b.lineId);
     });
 
-    test('saveAll chains within the batch', () async {
-      final repo = newRepo();
-      final saved = await repo.saveAll([
-        entity(id: 'e-1'),
-        entity(id: 'e-2'),
-        entity(id: 'e-1', value: 'updated'),
-      ]);
-
-      expect(saved[0].prev, const LineId.first());
-      expect(saved[1].prev, saved[0].lineId);
-      expect(saved[2].prev, saved[1].lineId);
-    });
-
     test('delete chains as another version', () async {
       final repo = newRepo();
       final first = await repo.save(entity());

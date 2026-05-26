@@ -164,41 +164,6 @@ void main() {
     });
   });
 
-  group('saveAllTransactions', () {
-    test('rejects entire batch if any transaction is invalid', () async {
-      final good = balancedExpense(id: 'tx-good');
-      final bad = Transaction(
-        id: const TransactionId('tx-bad'),
-        date: now,
-        description: 'Bad',
-        type: TransactionType.expense,
-        legs: [
-          Leg(
-            accountId: const AccountId('checking'),
-            amount: Decimal.parse('-50.00'),
-            currencyCode: const CurrencyCode('USD'),
-          ),
-        ],
-        createdAt: now,
-      );
-
-      final result = await ledger.saveAll([good, bad]);
-
-      expect(result.isValid, false);
-      expect(await ledger.transactions.getAll(), isEmpty);
-    });
-
-    test('saves all when every transaction is valid', () async {
-      final result = await ledger.saveAll([
-        balancedExpense(id: 'tx-1'),
-        balancedExpense(id: 'tx-2'),
-      ]);
-
-      expect(result.isValid, true);
-      expect(await ledger.transactions.getAll(), hasLength(2));
-    });
-  });
-
   group('computeBalances', () {
     test('returns empty map when no transactions', () async {
       expect(await ledger.computeBalances(), isEmpty);
@@ -220,7 +185,7 @@ void main() {
     });
 
     test('accumulates multiple transactions for same account', () async {
-      await ledger.saveAll([
+      await ledger.save(
         Transaction(
           id: const TransactionId('tx-1'),
           date: now,
@@ -239,6 +204,8 @@ void main() {
           ],
           createdAt: now,
         ),
+      );
+      await ledger.save(
         Transaction(
           id: const TransactionId('tx-2'),
           date: now,
@@ -257,7 +224,7 @@ void main() {
           ],
           createdAt: now,
         ),
-      ]);
+      );
 
       final balances = await ledger.computeBalances();
 
@@ -317,10 +284,8 @@ void main() {
   group('query', () {
     test('routes through runQuery and returns the matching transactions',
         () async {
-      await ledger.saveAll([
-        balancedExpense(id: 'tx-1'),
-        balancedExpense(id: 'tx-2'),
-      ]);
+      await ledger.save(balancedExpense(id: 'tx-1'));
+      await ledger.save(balancedExpense(id: 'tx-2'));
 
       final result = await ledger.query(
         const LedgerFilter(accounts: {AccountId('checking')}),

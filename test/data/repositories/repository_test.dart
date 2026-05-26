@@ -44,17 +44,6 @@ void main() {
       expect(all.first.value, 'v1');
     });
 
-    test('saveAll persists multiple entities', () async {
-      await repo.saveAll([
-        entity(id: 'e-1'),
-        entity(id: 'e-2'),
-      ]);
-
-      final all = await repo.getAll();
-      expect(all, hasLength(2));
-      expect(all.map((e) => e.id.value), containsAll(['e-1', 'e-2']));
-    });
-
     test('delete marks entity as deleted (latest version)', () async {
       await repo.save(entity());
       await repo.delete(entity());

@@ -199,7 +199,7 @@ void main() {
     });
   });
 
-  group('LedgerView seeding & rebuild', () {
+  group('LedgerView seeding', () {
     test('register seeds the view from an existing journal', () async {
       final first = await freshLedger();
       await first.save(expense(id: 'tx-1', amount: '50'));
@@ -212,19 +212,6 @@ void main() {
       expect(result.transactions, hasLength(2));
       // 4 legs total (2 per tx); same-currency balanced.
       expect(result.stats.count, 4);
-    });
-
-    test('rebuildViews wipes and re-seeds from current journal state',
-        () async {
-      final ledger = await freshLedger();
-      await ledger.register(name: 'totals');
-      await ledger.save(expense(id: 'tx-1', amount: '50'));
-      expect(ledger.viewResult('totals')!.result.transactions, hasLength(1));
-
-      await ledger.rebuildViews();
-      // After rebuild the state matches the journal as it stands now.
-      expect(ledger.viewResult('totals')!.result.transactions, hasLength(1));
-      expect(ledger.viewResult('totals')!.result.stats.count, 2);
     });
   });
 

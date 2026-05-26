@@ -41,11 +41,11 @@ abstract interface class ReadOnlyRepository<Id,
 /// returned list includes soft-deleted entries (deleted: true). Callers
 /// who only want active entries should filter.
 ///
-/// On `save`/`saveAll`, the repository generates a fresh `lineId` and
-/// sets `prev` to the lineId of the previous append in this file —
-/// regardless of which entity id that append touched. Together, every
-/// append in a single file forms one linear chain. The lookup uses a
-/// lazy in-memory tip cache warmed from the file on first access.
+/// On `save`, the repository generates a fresh `lineId` and sets `prev` to
+/// the lineId of the previous append in this file — regardless of which
+/// entity id that append touched. Together, every append in a single file
+/// forms one linear chain. The lookup uses a lazy in-memory tip cache warmed
+/// from the file on first access.
 ///
 /// This class is intended as an internal collaborator of `LedgerService`;
 /// production code should not use the write methods directly — go through
@@ -105,21 +105,6 @@ class Repository<Id, T extends JsonlStorable<Id>>
     final chained = entity.withChain(lineId: lineId, prev: prev) as T;
     await store.append(chained);
     _tip = lineId;
-    return chained;
-  }
-
-  Future<List<T>> saveAll(List<T> entities) async {
-    if (entities.isEmpty) return const [];
-    var prev = await _ensureTip();
-    final chained = <T>[];
-    for (final entity in entities) {
-      final lineId = _newLineId();
-      final c = entity.withChain(lineId: lineId, prev: prev) as T;
-      chained.add(c);
-      prev = lineId;
-    }
-    await store.appendAll(chained);
-    _tip = prev;
     return chained;
   }
 

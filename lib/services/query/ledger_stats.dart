@@ -6,7 +6,6 @@ import '../../models/leg.dart';
 import '../../models/transaction.dart';
 import 'ledger_group.dart';
 import 'stat.dart';
-import 'transaction_source.dart';
 
 part 'ledger_stats.freezed.dart';
 
@@ -98,10 +97,8 @@ class Stats implements Stat<Stats> {
 /// Tree returned by `LedgerService.query` and maintained by `LedgerView`.
 ///
 /// A [LeafResult] holds its bucket's stats plus a [TransactionSource] — the
-/// rows behind the bucket, which may be fully materialized (one-shot query,
-/// in-memory view) or partly behind an unhydrated checkpoint (a view restored
-/// from disk, PR C). A [NodeResult] holds its children and a [stats] computed
-/// once at build time. Node transactions are not materialized — the
+/// rows behind the bucket. A [NodeResult] holds its children and a [stats]
+/// computed once at build time. Node transactions are not materialized — the
 /// [transactions] extension getter walks the subtree lazily.
 ///
 /// Leaves only ever appear at the deepest grouping level (or as the
@@ -123,16 +120,11 @@ sealed class QueryResult with _$QueryResult {
 
 /// Unified accessors over the sealed [QueryResult] tree.
 extension QueryResultOps on QueryResult {
-  /// Synchronously-available transactions in this subtree, deduplicated by
-  /// id.
-  ///
-  /// On a [LeafResult] returns the [TransactionSource]'s materialized rows.
-  /// NOTE: a leaf restored from disk may hold an unhydrated [Checkpoint], in
-  /// which case this returns only the overlay — full resolution (PR C) is
-  /// async via the ledger. On a [NodeResult] returns a lazy iterator that
-  /// walks the children and dedups by id.
+  /// Transactions in this subtree, deduplicated by id. On a [LeafResult]
+  /// returns the [TransactionSource]'s materialized rows; on a [NodeResult]
+  /// returns a lazy iterator that walks the children and dedups by id.
   Iterable<Transaction> get transactions => switch (this) {
-        LeafResult(source: final s) => s.recentRows,
+        LeafResult(source: final s) => s.materialized,
         NodeResult(:final children) =>
           _dedupTransactions(children.expand((c) => c.transactions)),
       };
@@ -142,6 +134,16 @@ extension QueryResultOps on QueryResult {
         LeafResult _ => const Iterable<QueryResult>.empty(),
         NodeResult(children: final c) => c,
       };
+}
+
+/// A [LeafResult]'s transactions. For now just the materialized rows behind
+/// the bucket; Phase 1.8 PR C will add an unhydrated checkpoint base (rows
+/// folded in before a disk-restored view's watermark) alongside these, so a
+/// leaf can stay lazy until a drill-down asks for its rows.
+class TransactionSource {
+  final List<Transaction> materialized;
+
+  const TransactionSource({this.materialized = const []});
 }
 
 /// Folds every [Stats] in [all] into one via [Stats.combine]. Returns a

@@ -61,8 +61,9 @@ lib/
     query/
       ledger_filter.dart            # filter spec
       ledger_group.dart             # group dimensions + sealed GroupKey
-      ledger_stats.dart             # Stats container + sealed QueryResult
+      ledger_stats.dart             # Stats container + sealed QueryResult + TransactionSource
       stat.dart                     # Stat<V> functor + built-ins
+      ledger_view.dart              # LedgerView: a named query kept fresh on save
 
   ui/                               # see "UX Specification" below
     screens/
@@ -95,7 +96,7 @@ ledger.currencies    // ReadOnlyRepository<CurrencyId, Currency>
 ledger.transactions  // ReadOnlyRepository<TransactionId, Transaction>
 ```
 
-All writes go through generic helpers — `ledger.save<T>(entity)`, `ledger.saveAll<T>(entities)`, `ledger.delete<T>(entity)` — which validate (when the entity implements `Validatable`) and dispatch to the right repo based on the entity's runtime type.
+All writes go through generic helpers — `ledger.save<T>(entity)`, `ledger.delete<T>(entity)` — which validate (when the entity implements `Validatable`) and dispatch to the right repo based on the entity's runtime type.
 
 ### Construction
 **Construction is async**, via `LedgerService.create(...)`. The factory ensures the built-in Expense and Income accounts exist on disk before returning. Direct construction is private — there is no synchronous path.
@@ -112,7 +113,7 @@ final ledger = await LedgerService.create(
 ### Repositories
 - `Repository<Id, T extends JsonlStorable<Id>>` is the generic base.
 - `streamAll()` returns the latest version of every entity (dedup by id, newest-first) as a `Stream<T>`. `getAll()` is just `streamAll().toList()`.
-- `save` / `saveAll` / `delete` assign chain pointers automatically (see "Append-chain" below). Callers never set `lineId` or `prev` manually.
+- `save` / `delete` assign chain pointers automatically (see "Append-chain" below). Callers never set `lineId` or `prev` manually.
 - The repository class is internal to `LedgerService`; production code shouldn't touch it directly.
 
 ### Append-chain (per-file)
@@ -135,7 +136,7 @@ See `services/query/` for the filter/group/stats engine.
 - **`Stat<V>`** — incrementally maintainable functor: `value`, `apply(leg, tx)`, `combine(other)`. **Apply respects `tx.deleted` as its sign** — a deleted leg contributes the *negative* of an active one. That single convention covers both one-shot aggregation and the "revert by re-applying with deleted flipped" incremental path. Built-ins: `CountStat`, `SumByCurrencyStat`.
 - **`Stats`** — typed container of `Stat`s (`Map<Type, Stat>`). `Stats.of([...])` for a custom template; `Stats.defaults()` for count + sumByCurrency. Convenience getters `stats.count` and `stats.sumByCurrency`.
 - **`QueryResult`** — sealed: `LeafResult { key, source, stats }` and `NodeResult { key, children, stats }`. `stats` is stored on every node. `transactions` and `children` are exposed via an extension on `QueryResult` that returns `Iterable` — node returns a lazy dedup walk; leaf returns its `source`'s materialized rows.
-- **`TransactionSource`** — a leaf's rows as a `Checkpoint?` base + a materialized `recent` overlay. One-shot `query` and in-memory views are fully materialized (`checkpoint == null`). A view restored from disk (PR C) holds an unhydrated `Checkpoint` (the leaf's root→leaf group-key path + the view watermark); live saves stack onto `recent` without forcing hydration. The synchronous `transactions` getter returns only `recent`; full resolution (fetch checkpoint rows, merge overlay) is async and lands in PR C.
+- **`TransactionSource`** — a leaf's rows. Currently just the `materialized` list behind the bucket. PR C will add an unhydrated checkpoint base (rows folded in before a disk-restored view's watermark) alongside it so a leaf can stay lazy until a drill-down asks for its rows — that lands with the persistence work, not before.
 
 ### Query semantics
 `ledger.query(filter, {groupBy})`:
@@ -387,7 +388,7 @@ Every report shares a top filter bar (date range, account, category). Filter sta
 
 ## Engine ↔ UI contract
 
-When wiring providers in Phase 2, expose `LedgerService` through a single Riverpod provider; derive read-side providers (`accountsProvider`, `categoriesProvider`, `transactionsProvider`, plus query-backed `balanceProvider`, `monthlySpendingProvider`, etc.) from it. Writes always go through `ledger.save` / `saveAll` / `delete` — never reach into a repository directly from the UI.
+When wiring providers in Phase 2, expose `LedgerService` through a single Riverpod provider; derive read-side providers (`accountsProvider`, `categoriesProvider`, `transactionsProvider`, plus query-backed `balanceProvider`, `monthlySpendingProvider`, etc.) from it. Writes always go through `ledger.save` / `delete` — never reach into a repository directly from the UI.
 
 Pre-computed views (`LedgerView`, Phase 1.8 PRs B/C) are the right abstraction for any report or dashboard card that re-renders frequently. Register one with `ledger.register(name:, filter:, groupBy:, template:)` and read its current tree via `ledger.viewResult(name)!.result`. A `LedgerView` *is* a named `(filter, groupBy, stats template)` plus the `QueryResult` it keeps fresh: it maintains the tree directly — every save walks each leg's root→leaf path and `apply`s it to every node on the way down (an edit/delete first re-applies the old version with `deleted` flipped to subtract), so there's no rebuild or roll-up. Each card maps to one named view; the provider listens for view updates and rebuilds on change.
 
