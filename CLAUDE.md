@@ -48,7 +48,7 @@ lib/
     storage/
       jsonl_store.dart              # generic JSONL read/append/writeAll
       jsonl_storable.dart           # JsonlEntity + JsonlStorable<Id> ifaces
-      file_sync.dart                # conflict detection & merge (Phase 1.9)
+      file_sync.dart                # mergeChains rebase + EntityConflict (Phase 1.9)
     repositories/
       repository.dart               # generic Repository + ReadOnlyRepository
       account_repository.dart       # trivial typed subclass
@@ -58,6 +58,7 @@ lib/
 
   services/                         # business logic
     ledger_service.dart             # the single entry point
+    ledger_state.dart               # LedgerState (Ready/Conflicted) + ConflictChoice
     query/
       ledger_filter.dart            # filter spec
       ledger_group.dart             # group dimensions + sealed GroupKey
@@ -216,7 +217,12 @@ Edits and deletes append a new line with the same UUID and a newer `updatedAt`. 
 Every line carries `lineId` (sealed `LineId.of(uuid)` once persisted) and `prev` (`LineId.first` or `LineId.of(uuid)` — the file's previous tip). Files are therefore self-describing chains.
 
 ### Conflict Resolution (Phase 1.9)
-On startup, scan sync folder for conflict copies (e.g., `transactions (1).jsonl`). Per-entity merge: detect divergence on shared entities, rebase via `prev`-pointer rewrite. On rebase tie, surface a `LedgerState.Conflicted` (with `EntityConflict` list) and reject further writes until `ledger.resolveConflicts(resolution)` is called. Delete conflict copies after successful merge.
+`LedgerService.create` runs `ledger.sync()` on startup (also callable on demand, e.g. when a watcher reports the folder changed). `sync()`:
+1. For each repo file, `Repository.merge()` scans the folder for conflict copies (`transactions (1).jsonl`, …), folds them in pairwise via `mergeChains` (a chain rebase — see "Append-chain"), rewrites the file, and deletes the copies.
+2. Brings any registered views current over the transactions the merge appended — **incrementally**, by replaying appends after each view's watermark (`_replayInto`), never a full rebuild.
+3. If any merge surfaced `EntityConflict`s (entities edited on both sides after the fork — *all* such, not just timestamp ties), the ledger moves to `LedgerConflicted(conflicts)` and rejects writes (`save`/`delete` throw `StateError`) until `ledger.resolveConflicts({conflict: ConflictChoice.ours | theirs})` returns it to `LedgerReady`. The merge leaves *theirs* as the provisional latest, so choosing `theirs` is a no-op and `ours` re-appends our version. Read `ledger.state` to drive the UI's sync indicator.
+
+`mergeChains` keeps each rebased append's original `lineId` (UUIDs don't collide) and rewrites only `prev`, so re-running a merge is idempotent; state stays latest-version-per-id, so no append is lost. The runtime file watcher (deciding *when* to call `sync()`) is deferred to the UI layer (M2).
 
 ## Testing Strategy
 
