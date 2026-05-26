@@ -105,16 +105,14 @@ class LedgerService {
 
     final store = _viewStore;
     final tip = await _transactions.currentTip();
-    final snapshot = store == null ? null : await store.load(name);
-    // Restore only when the snapshot is for the same config (a view's identity
-    // is its name *and* its config) and still reflects the current journal.
-    if (snapshot != null &&
-        snapshot.watermark == tip &&
-        snapshot.filter == view.filter &&
-        const ListEquality<GroupDimension>()
-            .equals(snapshot.groupBy, view.groupBy) &&
-        snapshot.template == view.template) {
-      view.restore(snapshot.tree);
+    final restored = store == null ? null : await store.load(name);
+    // Adopt the restored tree only when the snapshot is for the same config (a
+    // view's identity is its name *and* its config) and still reflects the
+    // current journal; otherwise rebuild from the journal and persist.
+    if (restored != null &&
+        restored.watermark == tip &&
+        _sameConfig(restored.view, view)) {
+      view.restore(restored.view.result);
     } else {
       view.seed(await _transactions.getAll());
       await store?.save(view, tip);
@@ -123,6 +121,14 @@ class LedgerService {
     _viewsByName[name] = view;
     return view;
   }
+
+  /// Whether two views share the same `(filter, groupBy, template)` — the part
+  /// of a view's identity beyond its name. Compared by value; `Set` equality
+  /// in [LedgerFilter] is order-independent.
+  static bool _sameConfig(LedgerView a, LedgerView b) =>
+      a.filter == b.filter &&
+      const ListEquality<GroupDimension>().equals(a.groupBy, b.groupBy) &&
+      a.template == b.template;
 
   /// The maintained view registered under [name]. Throws [ArgumentError] if
   /// no such view exists (a lookup miss is a programming error, not a value).

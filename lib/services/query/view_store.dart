@@ -41,13 +41,15 @@ class ViewStore {
         'tree': view.result.toJson(),
       });
 
-  /// The persisted snapshot for [name], or null if none was ever written.
-  Future<ViewSnapshot?> load(String name) async {
+  /// The persisted view named [name] (config + restored tree) together with
+  /// the journal [watermark] it reflects, or null if none was ever written.
+  /// The caller checks the watermark and config against what it's registering
+  /// before trusting the restored tree.
+  Future<({LedgerView view, LineId watermark})?> load(String name) async {
     final record = await _views.record(name).get(_db);
     if (record == null) return null;
-    return ViewSnapshot(
-      watermark:
-          LineId.fromJson((record['watermark'] as Map).cast<String, dynamic>()),
+    final view = LedgerView(
+      name: name,
       filter:
           LedgerFilter.fromJson((record['filter'] as Map).cast<String, dynamic>()),
       groupBy: [
@@ -56,25 +58,12 @@ class ViewStore {
       ],
       template:
           Stats.fromJson((record['template'] as Map).cast<String, Object?>()),
-      tree: QueryResult.fromJson((record['tree'] as Map).cast<String, Object?>()),
+    )..restore(QueryResult.fromJson(
+        (record['tree'] as Map).cast<String, Object?>()));
+    return (
+      view: view,
+      watermark:
+          LineId.fromJson((record['watermark'] as Map).cast<String, dynamic>()),
     );
   }
-}
-
-/// A view's persisted state: the [filter]/[groupBy]/[template] it was built
-/// with, the restored stats [tree], and the journal [watermark] it reflects.
-class ViewSnapshot {
-  final LineId watermark;
-  final LedgerFilter filter;
-  final List<GroupDimension> groupBy;
-  final Stats template;
-  final QueryResult tree;
-
-  ViewSnapshot({
-    required this.watermark,
-    required this.filter,
-    required this.groupBy,
-    required this.template,
-    required this.tree,
-  });
 }
