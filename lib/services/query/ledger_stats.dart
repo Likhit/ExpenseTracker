@@ -3,6 +3,7 @@ import 'package:decimal/decimal.dart';
 import '../../models/ids.dart';
 import '../../models/leg.dart';
 import '../../models/transaction.dart';
+import 'ledger_filter.dart';
 import 'ledger_group.dart';
 import 'stat.dart';
 
@@ -101,12 +102,16 @@ class Stats implements Stat<Stats> {
 /// Leaves only ever appear at the deepest grouping level (or as the
 /// entire result for an ungrouped query).
 ///
-/// A plain mutable sealed tree (not `freezed`): `LedgerService.query` builds
-/// one and never touches it again, while `LedgerView` maintains its tree in
-/// place as transactions are saved — bumping a node's [stats] and adding or
-/// dropping [NodeResult.children] / swapping a [LeafResult.source]. It is not
-/// serialized and nothing relies on value-equality, so immutability would buy
-/// us nothing but the awkwardness of rebuilding the tree on every save.
+/// A plain mutable sealed tree (not `freezed`): it is not serialized and
+/// nothing relies on value-equality, so immutability would buy us nothing but
+/// the awkwardness of rebuilding the tree on every save.
+///
+/// The tree owns the fold. [add] takes a transaction, routes each of its
+/// matching legs down the [groupBy] path, bumps stats at every node, and
+/// records the row at the leaf; [remove] is its inverse. `LedgerService.query`
+/// builds a result by `add`-ing every transaction into an empty tree, and
+/// `LedgerView` maintains its tree by forwarding each save to [remove]/[add] —
+/// so the traversal/fold lives in exactly one place.
 sealed class QueryResult {
   final GroupKey key;
   Stats stats;
@@ -124,11 +129,106 @@ sealed class QueryResult {
     required List<QueryResult> children,
     required Stats stats,
   }) = NodeResult;
+
+  /// An empty root for [groupBy]: a [LeafResult] when ungrouped, else a
+  /// childless [NodeResult]. [template] sets the zero-state stats and fixes
+  /// which [Stat] kinds every bucket tracks.
+  factory QueryResult.empty(List<GroupDimension> groupBy, Stats template) =>
+      groupBy.isEmpty
+          ? LeafResult(
+              key: const GroupKey.none(),
+              source: const TransactionSource(),
+              stats: template,
+            )
+          : NodeResult(
+              key: const GroupKey.none(),
+              children: [],
+              stats: template,
+            );
+
+  /// Folds [tx]'s legs that match [filter] into this tree: bumps stats along
+  /// each leg's [groupBy] path (creating buckets from [template] as needed)
+  /// and records the row at the destination leaf. The single fold shared by
+  /// `LedgerService.query` and `LedgerView`. Call on the root.
+  void add(
+    Transaction tx,
+    LedgerFilter filter,
+    List<GroupDimension> groupBy,
+    Stats template,
+  ) {
+    for (final leg in filter.apply(tx)) {
+      _fold(leg, tx, groupBy, 0, template: template, stamp: tx);
+    }
+  }
+
+  /// Undoes a prior [add] of [tx]: re-applies each matching leg with `deleted`
+  /// flipped (the [Stat] convention turns that into a subtract) and forgets
+  /// the row, then prunes any bucket left empty. Call on the root.
+  void remove(
+    Transaction tx,
+    LedgerFilter filter,
+    List<GroupDimension> groupBy,
+  ) {
+    final reverted = tx.copyWith(deleted: !tx.deleted);
+    for (final leg in filter.apply(tx)) {
+      _fold(leg, reverted, groupBy, 0, unstamp: tx.id);
+    }
+    _prune(groupBy, 0);
+  }
+
+  /// Folds one [leg] of [tx] along its [groupBy] path from [depth], applying
+  /// to every node's stats. On the add pass [template] is non-null so missing
+  /// buckets are created and [stamp] records the row at the leaf; on the
+  /// remove pass [template] is null (the path pre-exists) and [unstamp]
+  /// forgets the row.
+  void _fold(
+    Leg leg,
+    Transaction tx,
+    List<GroupDimension> groupBy,
+    int depth, {
+    Stats? template,
+    Transaction? stamp,
+    TransactionId? unstamp,
+  }) {
+    stats = stats.apply(leg, tx);
+    final self = this;
+    if (depth == groupBy.length) {
+      self as LeafResult;
+      if (stamp != null) self.source = _stampInto(self.source, stamp);
+      if (unstamp != null) self.source = _unstampFrom(self.source, unstamp);
+      return;
+    }
+    self as NodeResult;
+    final childKey = groupBy[depth].keyFor(leg, tx);
+    var child = self.childFor(childKey);
+    if (child == null) {
+      if (template == null) return; // removing a path that isn't there
+      child = depth + 1 == groupBy.length
+          ? LeafResult(
+              key: childKey, source: const TransactionSource(), stats: template)
+          : NodeResult(key: childKey, children: [], stats: template);
+      self.children.add(child);
+    }
+    child._fold(leg, tx, groupBy, depth + 1,
+        template: template, stamp: stamp, unstamp: unstamp);
+  }
+
+  /// Drops empty subtrees bottom-up. Returns whether this node is now empty
+  /// and its parent should remove it; the root (depth 0) is kept regardless.
+  bool _prune(List<GroupDimension> groupBy, int depth) {
+    final self = this;
+    if (depth == groupBy.length) {
+      return (self as LeafResult).source.materialized.isEmpty && depth > 0;
+    }
+    self as NodeResult;
+    self.children.removeWhere((child) => child._prune(groupBy, depth + 1));
+    return self.children.isEmpty && depth > 0;
+  }
 }
 
 class LeafResult extends QueryResult {
-  /// The rows behind this bucket. Swapped wholesale by [LedgerView] when a
-  /// save adds or removes a row.
+  /// The rows behind this bucket. Swapped wholesale as a save adds or removes
+  /// a row.
   TransactionSource source;
 
   LeafResult({required GroupKey key, required this.source, required Stats stats})
@@ -136,13 +236,21 @@ class LeafResult extends QueryResult {
 }
 
 class NodeResult extends QueryResult {
-  /// One child per distinct group key at the next dimension. Mutated in place
-  /// by [LedgerView]; new buckets are appended, emptied ones removed.
+  /// One child per distinct group key at the next dimension. New buckets are
+  /// appended on [add]; emptied ones removed on [remove].
   final List<QueryResult> children;
 
   NodeResult(
       {required GroupKey key, required this.children, required Stats stats})
       : super(key, stats);
+
+  /// The child under [key], or null if no leg has routed there yet.
+  QueryResult? childFor(GroupKey key) {
+    for (final child in children) {
+      if (child.key == key) return child;
+    }
+    return null;
+  }
 }
 
 /// Unified accessors over the sealed [QueryResult] tree.
@@ -173,15 +281,18 @@ class TransactionSource {
   const TransactionSource({this.materialized = const []});
 }
 
-/// Folds every [Stats] in [all] into one via [Stats.combine]. Returns a
-/// default-template [Stats] when [all] is empty (the identity).
-Stats combineStats(Iterable<Stats> all) {
-  Stats? combined;
-  for (final s in all) {
-    combined = combined == null ? s : combined.combine(s);
-  }
-  return combined ?? Stats.defaults();
-}
+TransactionSource _stampInto(TransactionSource source, Transaction row) =>
+    TransactionSource(materialized: [
+      for (final t in source.materialized)
+        if (t.id != row.id) t,
+      row,
+    ]);
+
+TransactionSource _unstampFrom(TransactionSource source, TransactionId id) =>
+    TransactionSource(materialized: [
+      for (final t in source.materialized)
+        if (t.id != id) t,
+    ]);
 
 Iterable<Transaction> _dedupTransactions(Iterable<Transaction> txs) sync* {
   final seen = <TransactionId>{};

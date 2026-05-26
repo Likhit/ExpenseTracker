@@ -10,7 +10,6 @@ import '../models/account.dart';
 import '../models/category.dart';
 import '../models/currency.dart';
 import '../models/ids.dart';
-import '../models/leg.dart';
 import '../models/transaction.dart';
 import '../models/validation_result.dart';
 import 'query/ledger_filter.dart';
@@ -188,71 +187,17 @@ class LedgerService {
   /// leaves carry the per-bucket transactions and stats; intermediate
   /// nodes derive theirs from the subtree.
   ///
-  /// Consumes the transaction repo as a stream so non-matching rows are
-  /// discarded without ever sitting in memory; only legs that survive
-  /// [filter] are held while the tree is built.
+  /// Consumes the transaction repo as a stream, folding each transaction into
+  /// the result tree via [QueryResult.add] — the same fold `LedgerView` uses —
+  /// so non-matching rows are discarded without ever sitting in memory.
   Future<QueryResult> query(
     LedgerFilter filter, {
     List<GroupDimension> groupBy = const [],
   }) async {
-    final matchedLegs = <({Leg leg, Transaction tx})>[];
+    final template = Stats.defaults();
+    final result = QueryResult.empty(groupBy, template);
     await for (final tx in _transactions.streamAll()) {
-      final legs = filter.apply(tx);
-      if (legs.isEmpty) continue;
-      for (final leg in legs) {
-        matchedLegs.add((leg: leg, tx: tx));
-      }
-    }
-    return _buildTree(matchedLegs, groupBy, const GroupKey.none());
-  }
-
-  QueryResult _buildTree(
-    List<({Leg leg, Transaction tx})> legs,
-    List<GroupDimension> remaining,
-    GroupKey key,
-  ) {
-    if (remaining.isEmpty) {
-      return QueryResult.leaf(
-        key: key,
-        source: TransactionSource(materialized: _uniqueTxs(legs)),
-        stats: _statsOf(legs),
-      );
-    }
-    final dim = remaining.first;
-    final rest = remaining.sublist(1);
-
-    // Insertion-ordered: groups appear in the order their first leg was
-    // encountered. Deterministic given the input stream order.
-    final buckets = <GroupKey, List<({Leg leg, Transaction tx})>>{};
-    for (final ml in legs) {
-      final k = dim.keyFor(ml.leg, ml.tx);
-      buckets.putIfAbsent(k, () => []).add(ml);
-    }
-
-    final children = [
-      for (final entry in buckets.entries)
-        _buildTree(entry.value, rest, entry.key),
-    ];
-    return QueryResult.node(
-      key: key,
-      children: children,
-      stats: combineStats(children.map((c) => c.stats)),
-    );
-  }
-
-  Stats _statsOf(List<({Leg leg, Transaction tx})> legs) {
-    var stats = Stats.defaults();
-    for (final ml in legs) {
-      stats = stats.apply(ml.leg, ml.tx);
-    }
-    return stats;
-  }
-
-  List<Transaction> _uniqueTxs(List<({Leg leg, Transaction tx})> legs) {
-    final seen = <TransactionId>{};
-    final result = <Transaction>[];
-    for (final ml in legs) {
-      if (seen.add(ml.tx.id)) result.add(ml.tx);
+      result.add(tx, filter, groupBy, template);
     }
     return result;
   }
