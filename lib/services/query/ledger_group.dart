@@ -14,7 +14,7 @@ enum TimeBucket { day, week, month, year }
 /// One axis to group by. Compose multiple dimensions into a list for
 /// nested grouping; `[ByAccount, ByCurrency]` produces a tree keyed by
 /// account at the top level, then by currency under each account.
-@freezed
+@Freezed(unionKey: 'd')
 sealed class GroupDimension with _$GroupDimension {
   const GroupDimension._();
 
@@ -30,6 +30,9 @@ sealed class GroupDimension with _$GroupDimension {
   const factory GroupDimension.byCurrency() = ByCurrency;
 
   const factory GroupDimension.byTime(TimeBucket bucket) = ByTime;
+
+  factory GroupDimension.fromJson(Map<String, dynamic> json) =>
+      _$GroupDimensionFromJson(json);
 
   /// Resolves the group key for [leg] under this dimension. [tx] is
   /// passed for transaction-level fields (currently only [ByTime] uses

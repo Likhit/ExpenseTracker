@@ -9,6 +9,7 @@ import 'package:expense_tracker/models/ids.dart';
 import 'package:expense_tracker/models/leg.dart';
 import 'package:expense_tracker/models/transaction.dart';
 import 'package:expense_tracker/services/ledger_service.dart';
+import 'package:expense_tracker/services/query/ledger_filter.dart';
 import 'package:expense_tracker/services/query/ledger_group.dart';
 import 'package:expense_tracker/services/query/ledger_stats.dart';
 import 'package:expense_tracker/services/query/view_store.dart';
@@ -114,6 +115,30 @@ void main() {
       expect(leaf.source.materialized, isEmpty); // rows not loaded
       expect(leaf.source.checkpoint, isNotNull); // ...but flagged as on-disk
       expect(view.result.transactions, isEmpty);
+    });
+  });
+
+  group('config drift', () {
+    test('does not restore a snapshot built with a different filter',
+        () async {
+      final store = ViewStore(db);
+      // Snapshot 'spending' as an unfiltered view over one expense.
+      final a = await ledger(store: store);
+      await a.register(name: 'spending');
+      await a.save(expense(id: 'tx-1', amount: '50'));
+
+      // "Restart" and register the SAME name with a filter that excludes the
+      // expense leg's category. The journal hasn't changed (watermark would
+      // match), so only the config check can prevent a stale restore.
+      final b = await ledger(store: store);
+      final view = await b.register(
+        name: 'spending',
+        filter: const LedgerFilter(categories: {CategoryPath('Travel')}),
+      );
+
+      // Recomputed under the new filter: nothing matches 'Travel'.
+      expect(view.result.transactions, isEmpty);
+      expect(view.result.stats.count, 0);
     });
   });
 

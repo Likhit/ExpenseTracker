@@ -1,3 +1,4 @@
+import 'package:collection/collection.dart';
 import 'package:decimal/decimal.dart';
 
 import '../data/repositories/account_repository.dart';
@@ -105,11 +106,18 @@ class LedgerService {
     final store = _viewStore;
     final tip = await _transactions.currentTip();
     final snapshot = store == null ? null : await store.load(name);
-    if (snapshot != null && snapshot.watermark == tip) {
+    // Restore only when the snapshot is for the same config (a view's identity
+    // is its name *and* its config) and still reflects the current journal.
+    if (snapshot != null &&
+        snapshot.watermark == tip &&
+        snapshot.filter == view.filter &&
+        const ListEquality<GroupDimension>()
+            .equals(snapshot.groupBy, view.groupBy) &&
+        snapshot.template == view.template) {
       view.restore(snapshot.tree);
     } else {
       view.seed(await _transactions.getAll());
-      await store?.save(name, view.result, tip);
+      await store?.save(view, tip);
     }
 
     _viewsByName[name] = view;
@@ -217,7 +225,7 @@ class LedgerService {
     if (store == null || _viewsByName.isEmpty) return;
     final tip = await _transactions.currentTip();
     for (final view in _viewsByName.values) {
-      await store.save(view.name, view.result, tip);
+      await store.save(view, tip);
     }
   }
 
