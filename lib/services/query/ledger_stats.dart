@@ -1,13 +1,10 @@
 import 'package:decimal/decimal.dart';
-import 'package:freezed_annotation/freezed_annotation.dart';
 
 import '../../models/ids.dart';
 import '../../models/leg.dart';
 import '../../models/transaction.dart';
 import 'ledger_group.dart';
 import 'stat.dart';
-
-part 'ledger_stats.freezed.dart';
 
 /// Typed container of [Stat] instances. A [Stats] tracks one entry per
 /// stat *kind* (one [CountStat], one [SumByCurrencyStat], …). The set
@@ -103,19 +100,49 @@ class Stats implements Stat<Stats> {
 ///
 /// Leaves only ever appear at the deepest grouping level (or as the
 /// entire result for an ungrouped query).
-@freezed
-sealed class QueryResult with _$QueryResult {
-  const factory QueryResult.leaf({
+///
+/// A plain mutable sealed tree (not `freezed`): `LedgerService.query` builds
+/// one and never touches it again, while `LedgerView` maintains its tree in
+/// place as transactions are saved — bumping a node's [stats] and adding or
+/// dropping [NodeResult.children] / swapping a [LeafResult.source]. It is not
+/// serialized and nothing relies on value-equality, so immutability would buy
+/// us nothing but the awkwardness of rebuilding the tree on every save.
+sealed class QueryResult {
+  final GroupKey key;
+  Stats stats;
+
+  QueryResult(this.key, this.stats);
+
+  factory QueryResult.leaf({
     required GroupKey key,
     required TransactionSource source,
     required Stats stats,
   }) = LeafResult;
 
-  const factory QueryResult.node({
+  factory QueryResult.node({
     required GroupKey key,
-    required Iterable<QueryResult> children,
+    required List<QueryResult> children,
     required Stats stats,
   }) = NodeResult;
+}
+
+class LeafResult extends QueryResult {
+  /// The rows behind this bucket. Swapped wholesale by [LedgerView] when a
+  /// save adds or removes a row.
+  TransactionSource source;
+
+  LeafResult({required GroupKey key, required this.source, required Stats stats})
+      : super(key, stats);
+}
+
+class NodeResult extends QueryResult {
+  /// One child per distinct group key at the next dimension. Mutated in place
+  /// by [LedgerView]; new buckets are appended, emptied ones removed.
+  final List<QueryResult> children;
+
+  NodeResult(
+      {required GroupKey key, required this.children, required Stats stats})
+      : super(key, stats);
 }
 
 /// Unified accessors over the sealed [QueryResult] tree.
