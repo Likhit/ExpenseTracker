@@ -69,15 +69,15 @@ void main() {
         GroupDimension.byAccount(),
         GroupDimension.byCurrency(),
       ]);
-      final result = ledger.viewResult('balances')!.result;
+      final result = ledger.viewResult('balances').result;
       expect(result.children, isEmpty);
       expect(result.stats.count, 0);
     });
 
-    test('unknown view name returns null', () async {
+    test('unknown view name throws', () async {
       final ledger = await freshLedger();
       await ledger.register(name: 'balances');
-      expect(ledger.viewResult('nope'), isNull);
+      expect(() => ledger.viewResult('nope'), throwsArgumentError);
     });
 
     test('duplicate view names rejected at registration', () async {
@@ -96,7 +96,7 @@ void main() {
       await ledger.register(name: 'totals');
       await ledger.save(expense(id: 'tx-1', amount: '50'));
 
-      final result = ledger.viewResult('totals')!.result;
+      final result = ledger.viewResult('totals').result;
       expect(result.transactions, hasLength(1));
       expect(result.stats.count, 2);
       // -50 + 50 (same-currency balanced).
@@ -112,7 +112,7 @@ void main() {
       );
       await ledger.save(expense(id: 'tx-1', amount: '50'));
 
-      final result = ledger.viewResult('by-account')!.result;
+      final result = ledger.viewResult('by-account').result;
       final byAccount = {
         for (final c in result.children) (c.key as AccountKey).id: c,
       };
@@ -133,7 +133,7 @@ void main() {
       // Edit: bump the amount to $80.
       await ledger.save(expense(id: 'tx-1', amount: '80'));
 
-      final result = ledger.viewResult('by-account')!.result;
+      final result = ledger.viewResult('by-account').result;
       final chase = result.children.firstWhere(
           (c) => (c.key as AccountKey).id == const AccountId('chase'));
       expect(chase.stats.sumByCurrency,
@@ -148,7 +148,7 @@ void main() {
       await ledger.save(tx);
       await ledger.delete(tx);
 
-      final result = ledger.viewResult('totals')!.result;
+      final result = ledger.viewResult('totals').result;
       // The default filter excludes deleted, so the view's leaf is empty:
       // stats back to zero, transactions gone.
       expect(result.transactions, isEmpty);
@@ -168,7 +168,7 @@ void main() {
       await ledger.save(
           expense(id: 'tx-2', amount: '10', category: 'Transport::Taxi'));
 
-      final result = ledger.viewResult('food-only')!.result;
+      final result = ledger.viewResult('food-only').result;
       expect(result.transactions.map((t) => t.id),
           {const TransactionId('tx-1')});
       // Only the Chase leg of tx-1 carries the Food category, so the sum is
@@ -191,10 +191,10 @@ void main() {
       await ledger.save(
           expense(id: 'tx-2', amount: '20', category: 'Transport::Taxi'));
 
-      expect(ledger.viewResult('food')!.result.transactions.map((t) => t.id),
+      expect(ledger.viewResult('food').result.transactions.map((t) => t.id),
           {const TransactionId('tx-1')});
       expect(
-          ledger.viewResult('transport')!.result.transactions.map((t) => t.id),
+          ledger.viewResult('transport').result.transactions.map((t) => t.id),
           {const TransactionId('tx-2')});
     });
   });
@@ -208,7 +208,7 @@ void main() {
       // Reopen with a view registered; registration replays the journal.
       final reopened = await freshLedger();
       await reopened.register(name: 'totals');
-      final result = reopened.viewResult('totals')!.result;
+      final result = reopened.viewResult('totals').result;
       expect(result.transactions, hasLength(2));
       // 4 legs total (2 per tx); same-currency balanced.
       expect(result.stats.count, 4);
@@ -229,7 +229,7 @@ void main() {
       await ledger.save(expense(id: 'tx-2', amount: '30', currency: 'EUR'));
       await ledger.save(expense(id: 'tx-3', amount: '10'));
 
-      final fromView = ledger.viewResult('by-account-currency')!.result;
+      final fromView = ledger.viewResult('by-account-currency').result;
       final fromQuery = await ledger.query(
         const LedgerFilter(),
         groupBy: const [

@@ -94,9 +94,16 @@ class LedgerService {
     return view;
   }
 
-  /// The named maintained view, or null if no such view is registered.
-  /// Read its current immutable tree via [LedgerView.result].
-  LedgerView? viewResult(String name) => _viewsByName[name];
+  /// The maintained view registered under [name]. Throws [ArgumentError] if
+  /// no such view exists (a lookup miss is a programming error, not a value).
+  /// Read its current tree via [LedgerView.result].
+  LedgerView viewResult(String name) {
+    final view = _viewsByName[name];
+    if (view == null) {
+      throw ArgumentError.value(name, 'name', 'No view registered');
+    }
+    return view;
+  }
 
   Future<void> _ensureBuiltinAccounts() async {
     final existingIds = (await _accounts.getAll()).map((a) => a.id).toSet();

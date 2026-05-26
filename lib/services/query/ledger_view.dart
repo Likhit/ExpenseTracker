@@ -7,7 +7,7 @@ import 'ledger_stats.dart';
 /// stats template) plus the [QueryResult] tree it maintains.
 ///
 /// Register one via `LedgerService.register(...)` and read its current tree
-/// via `ledger.viewResult(name)!.result`. The view owns no traversal logic of
+/// via `ledger.viewResult(name).result`. The view owns no traversal logic of
 /// its own: it forwards each save to [QueryResult.remove]/[QueryResult.add],
 /// the same fold `LedgerService.query` uses to build a result from scratch.
 class LedgerView {
