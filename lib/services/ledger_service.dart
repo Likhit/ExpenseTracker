@@ -16,6 +16,7 @@ import '../models/validation_result.dart';
 import 'query/ledger_filter.dart';
 import 'query/ledger_group.dart';
 import 'query/ledger_stats.dart';
+import 'query/transaction_source.dart';
 import 'views/ledger_view.dart';
 
 /// Single entry point for the double-entry engine.
@@ -41,70 +42,77 @@ class LedgerService {
 
   /// Named maintained views. Order is registration order; lookups go
   /// through [_viewsByName] for O(1) access.
-  final List<LedgerViewState> _viewStates;
-  final Map<String, LedgerViewState> _viewsByName;
+  final List<LedgerView> _views = [];
+  final Map<String, LedgerView> _viewsByName = {};
 
   LedgerService._({
     required String accountsPath,
     required String categoriesPath,
     required String currenciesPath,
     required String transactionsPath,
-    required List<LedgerView> views,
   })  : _accounts = AccountRepository(filePath: accountsPath),
         _categories = CategoryRepository(filePath: categoriesPath),
         _currencies = CurrencyRepository(filePath: currenciesPath),
-        _transactions = TransactionRepository(filePath: transactionsPath),
-        _viewStates = [for (final v in views) LedgerViewState(v)],
-        _viewsByName = {} {
-    for (final state in _viewStates) {
-      if (_viewsByName.containsKey(state.view.name)) {
-        throw ArgumentError(
-            'Duplicate view name: "${state.view.name}"');
-      }
-      _viewsByName[state.view.name] = state;
-    }
-  }
+        _transactions = TransactionRepository(filePath: transactionsPath);
 
-  /// Constructs a [LedgerService] over the given JSONL paths. Ensures
-  /// the built-in Expense and Income accounts are present on disk and
-  /// seeds every registered view by replaying the transaction journal
-  /// once before returning.
+  /// Constructs a [LedgerService] over the given JSONL paths. Ensures the
+  /// built-in Expense and Income accounts are present on disk before
+  /// returning. Register maintained views afterwards with [register].
   static Future<LedgerService> create({
     required String accountsPath,
     required String categoriesPath,
     required String currenciesPath,
     required String transactionsPath,
-    List<LedgerView> views = const [],
   }) async {
     final ledger = LedgerService._(
       accountsPath: accountsPath,
       categoriesPath: categoriesPath,
       currenciesPath: currenciesPath,
       transactionsPath: transactionsPath,
-      views: views,
     );
     await ledger._ensureBuiltinAccounts();
-    await ledger._seedViews();
     return ledger;
   }
 
-  Future<void> _seedViews() async {
-    if (_viewStates.isEmpty) return;
-    final txs = await _transactions.getAll();
-    for (final state in _viewStates) {
-      state.seed(txs);
+  /// Registers a maintained [LedgerView] under [name] and seeds it by
+  /// replaying the journal once. Subsequent saves keep it fresh via the
+  /// push-update path. Throws [ArgumentError] on a duplicate name. Returns
+  /// the registered view, whose current tree is read via [LedgerView.result].
+  Future<LedgerView> register({
+    required String name,
+    LedgerFilter filter = const LedgerFilter(),
+    List<GroupDimension> groupBy = const [],
+    Stats? template,
+  }) async {
+    if (_viewsByName.containsKey(name)) {
+      throw ArgumentError('Duplicate view name: "$name"');
     }
+    final view = LedgerView(
+      name: name,
+      filter: filter,
+      groupBy: groupBy,
+      template: template,
+    );
+    view.seed(await _transactions.getAll());
+    _views.add(view);
+    _viewsByName[name] = view;
+    return view;
   }
 
-  /// Current snapshot of the named view, or null if no such view is
-  /// registered. The returned [QueryResult] is immutable; subsequent
-  /// view updates do not mutate it.
-  QueryResult? viewResult(String name) => _viewsByName[name]?.current;
+  /// The named maintained view, or null if no such view is registered.
+  /// Read its current immutable tree via [LedgerView.result].
+  LedgerView? viewResult(String name) => _viewsByName[name];
 
-  /// Re-seeds every registered view by replaying the transaction
-  /// journal from scratch. Use after operations that bypass the
-  /// push-update path (Phase 1.9 sync merge will need this).
-  Future<void> rebuildViews() => _seedViews();
+  /// Re-seeds every registered view by replaying the transaction journal
+  /// from scratch. Use after operations that bypass the push-update path
+  /// (Phase 1.9 sync merge will need this).
+  Future<void> rebuildViews() async {
+    if (_views.isEmpty) return;
+    final txs = await _transactions.getAll();
+    for (final view in _views) {
+      view.seed(txs);
+    }
+  }
 
   Future<void> _ensureBuiltinAccounts() async {
     final existingIds = (await _accounts.getAll()).map((a) => a.id).toSet();
@@ -218,8 +226,8 @@ class LedgerService {
   }
 
   void _notifyViews(Transaction? old, Transaction newVersion) {
-    for (final state in _viewStates) {
-      state.applySave(old, newVersion);
+    for (final view in _views) {
+      view.applySave(old, newVersion);
     }
   }
 
@@ -257,7 +265,7 @@ class LedgerService {
     if (remaining.isEmpty) {
       return QueryResult.leaf(
         key: key,
-        transactions: _uniqueTxs(legs),
+        source: TransactionSource.materialized(_uniqueTxs(legs)),
         stats: _statsOf(legs),
       );
     }

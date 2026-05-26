@@ -6,6 +6,7 @@ import '../../models/leg.dart';
 import '../../models/transaction.dart';
 import 'ledger_group.dart';
 import 'stat.dart';
+import 'transaction_source.dart';
 
 part 'ledger_stats.freezed.dart';
 
@@ -94,13 +95,14 @@ class Stats implements Stat<Stats> {
   String toString() => 'Stats(${_stats.values.toList()})';
 }
 
-/// Tree returned by `LedgerService.query`.
+/// Tree returned by `LedgerService.query` and maintained by `LedgerView`.
 ///
-/// A [LeafResult] holds its bucket's transactions and stats directly.
-/// A [NodeResult] holds only its children and a pre-computed [stats]
-/// (rolled up once at build time, cached for the life of the result).
-/// Node transactions are not materialized — the [transactions] extension
-/// getter returns a lazy iterator that walks the subtree.
+/// A [LeafResult] holds its bucket's stats plus a [TransactionSource] — the
+/// rows behind the bucket, which may be fully materialized (one-shot query,
+/// in-memory view) or partly behind an unhydrated checkpoint (a view restored
+/// from disk, PR C). A [NodeResult] holds its children and a [stats] computed
+/// once at build time. Node transactions are not materialized — the
+/// [transactions] extension getter walks the subtree lazily.
 ///
 /// Leaves only ever appear at the deepest grouping level (or as the
 /// entire result for an ungrouped query).
@@ -108,7 +110,7 @@ class Stats implements Stat<Stats> {
 sealed class QueryResult with _$QueryResult {
   const factory QueryResult.leaf({
     required GroupKey key,
-    required Iterable<Transaction> transactions,
+    required TransactionSource source,
     required Stats stats,
   }) = LeafResult;
 
@@ -121,13 +123,16 @@ sealed class QueryResult with _$QueryResult {
 
 /// Unified accessors over the sealed [QueryResult] tree.
 extension QueryResultOps on QueryResult {
-  /// Matching transactions in this subtree, deduplicated by id.
+  /// Synchronously-available transactions in this subtree, deduplicated by
+  /// id.
   ///
-  /// On a [LeafResult] returns the stored iterable directly. On a
-  /// [NodeResult] returns a lazy iterator that walks the children and
-  /// dedups by id — nothing is materialized until the caller iterates.
+  /// On a [LeafResult] returns the [TransactionSource]'s materialized rows.
+  /// NOTE: a leaf restored from disk may hold an unhydrated [Checkpoint], in
+  /// which case this returns only the overlay — full resolution (PR C) is
+  /// async via the ledger. On a [NodeResult] returns a lazy iterator that
+  /// walks the children and dedups by id.
   Iterable<Transaction> get transactions => switch (this) {
-        LeafResult(transactions: final t) => t,
+        LeafResult(source: final s) => s.recentRows,
         NodeResult(:final children) =>
           _dedupTransactions(children.expand((c) => c.transactions)),
       };

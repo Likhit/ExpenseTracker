@@ -134,7 +134,8 @@ See `services/query/` for the filter/group/stats engine.
 - **`GroupKey`** — one variant per dimension, plus `none()` for legs missing the dimension (e.g., a Chase leg with no categoryPath under `byCategory`) and for the root of every result tree.
 - **`Stat<V>`** — incrementally maintainable functor: `value`, `apply(leg, tx)`, `combine(other)`. **Apply respects `tx.deleted` as its sign** — a deleted leg contributes the *negative* of an active one. That single convention covers both one-shot aggregation and the "revert by re-applying with deleted flipped" incremental path. Built-ins: `CountStat`, `SumByCurrencyStat`.
 - **`Stats`** — typed container of `Stat`s (`Map<Type, Stat>`). `Stats.of([...])` for a custom template; `Stats.defaults()` for count + sumByCurrency. Convenience getters `stats.count` and `stats.sumByCurrency`.
-- **`QueryResult`** — sealed: `LeafResult { key, transactions, stats }` and `NodeResult { key, children, stats }`. `stats` is computed eagerly at build time and stored on every node (rolled up via `combine`). `transactions` and `children` are exposed via an extension on `QueryResult` that returns `Iterable` — leaf returns its stored value, node returns a lazy walk (no materialization until iteration).
+- **`QueryResult`** — sealed: `LeafResult { key, source, stats }` and `NodeResult { key, children, stats }`. `stats` is stored on every node. `transactions` and `children` are exposed via an extension on `QueryResult` that returns `Iterable` — node returns a lazy dedup walk; leaf returns its `source`'s materialized rows.
+- **`TransactionSource`** — a leaf's rows as a `Checkpoint?` base + a materialized `recent` overlay. One-shot `query` and in-memory views are fully materialized (`checkpoint == null`). A view restored from disk (PR C) holds an unhydrated `Checkpoint` (the leaf's root→leaf group-key path + the view watermark); live saves stack onto `recent` without forcing hydration. The synchronous `transactions` getter returns only `recent`; full resolution (fetch checkpoint rows, merge overlay) is async and lands in PR C.
 
 ### Query semantics
 `ledger.query(filter, {groupBy})`:
@@ -388,7 +389,7 @@ Every report shares a top filter bar (date range, account, category). Filter sta
 
 When wiring providers in Phase 2, expose `LedgerService` through a single Riverpod provider; derive read-side providers (`accountsProvider`, `categoriesProvider`, `transactionsProvider`, plus query-backed `balanceProvider`, `monthlySpendingProvider`, etc.) from it. Writes always go through `ledger.save` / `saveAll` / `delete` — never reach into a repository directly from the UI.
 
-Pre-computed views (`LedgerView`, Phase 1.8 PRs B/C) are the right abstraction for any report or dashboard card that re-renders frequently. Each card maps to one named view; the provider listens for view updates and rebuilds on change.
+Pre-computed views (`LedgerView`, Phase 1.8 PRs B/C) are the right abstraction for any report or dashboard card that re-renders frequently. Register one with `ledger.register(name:, filter:, groupBy:, template:)` and read its current tree via `ledger.viewResult(name)!.result`. A `LedgerView` *is* a named `(filter, groupBy, stats template)` plus the `QueryResult` it keeps fresh: it maintains the tree directly — every save walks each leg's root→leaf path and `apply`s it to every node on the way down (an edit/delete first re-applies the old version with `deleted` flipped to subtract), so there's no rebuild or roll-up. Each card maps to one named view; the provider listens for view updates and rebuilds on change.
 
 ## Per-phase workflow
 

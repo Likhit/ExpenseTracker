@@ -4,210 +4,195 @@ import '../../models/transaction.dart';
 import '../query/ledger_filter.dart';
 import '../query/ledger_group.dart';
 import '../query/ledger_stats.dart';
+import '../query/transaction_source.dart';
 
-/// Definition of a named, kept-fresh aggregation over the journal.
+/// A named, kept-fresh aggregation over the journal — conceptually just a
+/// (filter, groupBy, stats template) plus the [QueryResult] it maintains.
 ///
-/// A [LedgerView] is just configuration — a (filter, groupBy, stats
-/// template) triple plus a human-friendly name. The mutable maintained
-/// state lives in [LedgerViewState], constructed and updated by
-/// `LedgerService` as transactions are saved.
+/// Register one via `LedgerService.register(...)` and read its current tree
+/// via `ledger.viewResult(name)!.result`. The service feeds every save into
+/// [applySave], which updates the maintained tree incrementally, so reads
+/// never re-scan the journal.
 ///
-/// Typical use:
-/// ```dart
-/// final ledger = await LedgerService.create(
-///   ...,
-///   views: [
-///     LedgerView(
-///       name: 'balances',
-///       groupBy: [GroupDimension.byAccount(), GroupDimension.byCurrency()],
-///     ),
-///     LedgerView(
-///       name: 'monthly-spending',
-///       filter: LedgerFilter(
-///         types: {TransactionType.expense},
-///         excludeAccounts: {Account.expenseId},
-///       ),
-///       groupBy: [GroupDimension.byTime(TimeBucket.month), GroupDimension.byCategory()],
-///     ),
-///   ],
-/// );
+/// The maintained tree is the same shape `LedgerService.query` returns, and
+/// is maintained the same way the engine aggregates: a node's stats are the
+/// fold of every leg beneath it. A save walks the root→leaf path of each of
+/// its legs and `apply`s the leg to every node on the way down — no rebuild,
+/// no roll-up pass. An edit/delete first re-applies the *old* version's legs
+/// with `deleted` flipped (the [Stat] convention turns that into a subtract),
+/// then applies the new version's.
 ///
-/// final balances = ledger.viewResult('balances');
-/// ```
+/// Leaves expose transactions through a [TransactionSource]; for an in-memory
+/// view those are always materialized, but the type leaves room for PR C's
+/// disk-restored views to hold an unhydrated [Checkpoint] with live edits
+/// stacked on top.
 class LedgerView {
   final String name;
   final LedgerFilter filter;
   final List<GroupDimension> groupBy;
 
-  /// Empty-state template that defines which [Stat] kinds each leaf
-  /// tracks. Defaults to [Stats.defaults] (count + sumByCurrency).
+  /// Empty-state template fixing which [Stat] kinds every node tracks.
   final Stats template;
 
+  /// Root of the maintained tree (key [GroupKey.none]). Its stats are the
+  /// running total across the whole view; children partition it along
+  /// [groupBy], one tree level per dimension.
+  final _Node _root;
+
+  /// Memoized immutable snapshot, invalidated on every mutation.
+  QueryResult? _cached;
+
   LedgerView({
-    required this.name,
-    this.filter = const LedgerFilter(),
-    this.groupBy = const [],
+    required String name,
+    LedgerFilter? filter,
+    List<GroupDimension>? groupBy,
     Stats? template,
-  }) : template = template ?? Stats.defaults();
-}
+  }) : this._(
+          name: name,
+          filter: filter ?? const LedgerFilter(),
+          groupBy: groupBy ?? const [],
+          template: template ?? Stats.defaults(),
+        );
 
-/// Mutable maintained state for one registered [LedgerView]. Lives
-/// inside `LedgerService`; production code reads the public
-/// [QueryResult] via [current] and never touches the mutators directly.
-class LedgerViewState {
-  final LedgerView view;
-  final Map<_LeafKey, _LeafState> _leaves = {};
+  LedgerView._({
+    required this.name,
+    required this.filter,
+    required this.groupBy,
+    required this.template,
+  }) : _root = _Node(const GroupKey.none(), template);
 
-  LedgerViewState(this.view);
+  /// Current immutable snapshot of the maintained tree. Safe to hold or
+  /// transform; future updates don't mutate it.
+  QueryResult get result => _cached ??= _build(_root, 0);
 
-  /// Wipes the maintained state and replays [txs] through the view.
-  /// Called on construction and on `ledger.rebuildViews()`.
+  /// Wipes the maintained state and replays [txs]. Called on registration
+  /// and on `ledger.rebuildViews()`.
   void seed(Iterable<Transaction> txs) {
-    _leaves.clear();
+    _root.stats = template;
+    _root.children.clear();
+    _root.txs.clear();
     for (final tx in txs) {
       applySave(null, tx);
     }
+    _cached = null;
   }
 
-  /// Diffs [oldVersion] vs [newVersion] and updates the maintained
-  /// state accordingly. Either may be null:
-  /// - oldVersion == null: brand-new transaction; apply [newVersion]'s
-  ///   matching legs.
-  /// - newVersion's matching legs may be empty (e.g. it's now
-  ///   soft-deleted and the view's filter excludes deleted): only the
-  ///   revert path runs.
-  ///
-  /// The revert path applies the old leg with `tx.deleted` flipped, so
-  /// the per-stat `apply` convention (deleted = subtract) cancels the
-  /// previously-added contribution.
+  /// Diffs [oldVersion] vs [newVersion] and updates the maintained tree.
+  /// [oldVersion] is null for a brand-new transaction. [newVersion]'s
+  /// matching legs may be empty (e.g. it's now soft-deleted and the view's
+  /// filter excludes deleted) — then only the revert path runs.
   void applySave(Transaction? oldVersion, Transaction newVersion) {
-    // Track which (leaf, txId) pairs the old version occupies so we
-    // can drop the cached Transaction from any leaf the new version
-    // no longer touches.
-    final oldLeafKeys = <_LeafKey>{};
+    // Revert the old version: re-apply each old leg with `deleted` flipped so
+    // the per-stat convention subtracts the prior contribution. Touch only
+    // existing nodes — a revert never creates a bucket.
+    final oldPaths = <List<GroupKey>>[];
     if (oldVersion != null) {
-      for (final leg in view.filter.apply(oldVersion)) {
+      for (final leg in filter.apply(oldVersion)) {
         final path = _pathFor(leg, oldVersion);
-        oldLeafKeys.add(path);
-        final state = _leaves[path];
-        if (state == null) continue;
-        state.stats = state.stats.apply(leg, _flipDeleted(oldVersion));
+        oldPaths.add(path);
+        _applyAlong(path, leg, _flipDeleted(oldVersion), create: false);
       }
     }
 
-    final newLeafKeys = <_LeafKey>{};
-    for (final leg in view.filter.apply(newVersion)) {
+    // Apply the new version, stamping its rows into the leaves it occupies.
+    final newPathKeys = <String>{};
+    for (final leg in filter.apply(newVersion)) {
       final path = _pathFor(leg, newVersion);
-      newLeafKeys.add(path);
-      final state = _leaves.putIfAbsent(
-        path,
-        () => _LeafState(stats: view.template),
-      );
-      state.stats = state.stats.apply(leg, newVersion);
-      state.transactions[newVersion.id] = newVersion;
+      newPathKeys.add(_pathKey(path));
+      _applyAlong(path, leg, newVersion, create: true, row: newVersion);
     }
 
-    // Any leaf that the old version was in but the new isn't: drop
-    // the cached Transaction for that id. Don't drop the leaf itself
-    // here — another transaction may still be contributing.
+    // Drop the old row from any leaf the new version no longer occupies.
     if (oldVersion != null) {
-      for (final path in oldLeafKeys.difference(newLeafKeys)) {
-        final state = _leaves[path];
-        if (state == null) continue;
-        state.transactions.remove(oldVersion.id);
+      for (final path in oldPaths) {
+        if (newPathKeys.contains(_pathKey(path))) continue;
+        _leafAt(path)?.txs.remove(oldVersion.id);
       }
     }
 
-    // Garbage-collect empty leaves so the tree only includes buckets
-    // that currently hold a transaction.
-    _leaves.removeWhere((_, state) => state.transactions.isEmpty);
+    // Prune buckets that no longer hold a row so the tree mirrors the journal.
+    _prune(_root, 0);
+    _cached = null;
   }
 
-  /// Current snapshot of the maintained tree. Builds an immutable
-  /// [QueryResult] from the internal leaf map; safe for callers to
-  /// hold or transform without affecting future updates.
-  QueryResult get current {
-    if (view.groupBy.isEmpty) {
-      final state = _leaves[const _LeafKey(<GroupKey>[])];
-      return QueryResult.leaf(
-        key: const GroupKey.none(),
-        transactions: state?.transactions.values ?? const <Transaction>[],
-        stats: state?.stats ?? view.template,
-      );
+  /// Walks root→leaf along [path], folding [leg]/[tx] into every node's
+  /// stats. With `create: true` missing nodes are spun up from [template];
+  /// with `create: false` (the revert path) a missing node aborts the walk.
+  /// When [row] is non-null it is stamped into the leaf's overlay.
+  void _applyAlong(
+    List<GroupKey> path,
+    Leg leg,
+    Transaction tx, {
+    required bool create,
+    Transaction? row,
+  }) {
+    var node = _root;
+    node.stats = node.stats.apply(leg, tx);
+    for (final key in path) {
+      var child = node.children[key];
+      if (child == null) {
+        if (!create) return; // reverting a path that isn't there — no-op
+        child = _Node(key, template);
+        node.children[key] = child;
+      }
+      child.stats = child.stats.apply(leg, tx);
+      node = child;
     }
-    if (_leaves.isEmpty) {
-      return QueryResult.node(
-        key: const GroupKey.none(),
-        children: const [],
-        stats: view.template,
-      );
-    }
-    return _buildSubtree(0, const GroupKey.none(), _leaves.entries.toList());
+    if (row != null) node.txs[row.id] = row;
   }
 
-  QueryResult _buildSubtree(
-    int depth,
-    GroupKey nodeKey,
-    List<MapEntry<_LeafKey, _LeafState>> entries,
-  ) {
-    if (depth == view.groupBy.length) {
-      // Every entry at this depth shares the full path, so they all
-      // collapse to one leaf. (The map key dedups on path.)
-      final state = entries.single.value;
+  _Node? _leafAt(List<GroupKey> path) {
+    var node = _root;
+    for (final key in path) {
+      final child = node.children[key];
+      if (child == null) return null;
+      node = child;
+    }
+    return node;
+  }
+
+  /// Removes empty subtrees bottom-up. Returns whether [node] is now empty
+  /// (and removable by its parent). The root is never removed by the caller.
+  bool _prune(_Node node, int depth) {
+    if (depth == groupBy.length) return node.txs.isEmpty;
+    node.children.removeWhere((_, child) => _prune(child, depth + 1));
+    return node.children.isEmpty;
+  }
+
+  QueryResult _build(_Node node, int depth) {
+    if (depth == groupBy.length) {
       return QueryResult.leaf(
-        key: nodeKey,
-        transactions: state.transactions.values,
-        stats: state.stats,
+        key: node.key,
+        source: TransactionSource.materialized(node.txs.values),
+        stats: node.stats,
       );
     }
-    final buckets = <GroupKey, List<MapEntry<_LeafKey, _LeafState>>>{};
-    for (final entry in entries) {
-      final key = entry.key.path[depth];
-      buckets.putIfAbsent(key, () => []).add(entry);
-    }
-    final children = [
-      for (final bucket in buckets.entries)
-        _buildSubtree(depth + 1, bucket.key, bucket.value),
-    ];
     return QueryResult.node(
-      key: nodeKey,
-      children: children,
-      stats: combineStats(children.map((c) => c.stats)),
+      key: node.key,
+      children: [for (final c in node.children.values) _build(c, depth + 1)],
+      stats: node.stats,
     );
   }
 
-  _LeafKey _pathFor(Leg leg, Transaction tx) => _LeafKey([
-        for (final dim in view.groupBy) dim.keyFor(leg, tx),
-      ]);
+  List<GroupKey> _pathFor(Leg leg, Transaction tx) =>
+      [for (final dim in groupBy) dim.keyFor(leg, tx)];
 
   Transaction _flipDeleted(Transaction tx) =>
-      tx.deleted ? tx.copyWith(deleted: false) : tx.copyWith(deleted: true);
+      tx.copyWith(deleted: !tx.deleted);
+
+  String _pathKey(List<GroupKey> path) =>
+      path.map((k) => k.toString()).join(' ');
 }
 
-class _LeafState {
+/// One node of a [LedgerView]'s maintained tree. Internal nodes route to
+/// [children] by the next dimension's [GroupKey]; leaves (at depth
+/// `groupBy.length`) hold the row overlay [txs]. Every node carries its own
+/// [stats], maintained directly by [LedgerView._applyAlong].
+class _Node {
+  final GroupKey key;
   Stats stats;
-  final Map<TransactionId, Transaction> transactions = {};
+  final Map<GroupKey, _Node> children = {};
+  final Map<TransactionId, Transaction> txs = {};
 
-  _LeafState({required this.stats});
-}
-
-/// Wrapper around `List<GroupKey>` with value-based equality so it can
-/// serve as a `Map` key in [LedgerViewState].
-class _LeafKey {
-  final List<GroupKey> path;
-
-  const _LeafKey(this.path);
-
-  @override
-  bool operator ==(Object other) {
-    if (other is! _LeafKey) return false;
-    if (path.length != other.path.length) return false;
-    for (var i = 0; i < path.length; i++) {
-      if (path[i] != other.path[i]) return false;
-    }
-    return true;
-  }
-
-  @override
-  int get hashCode => Object.hashAll(path);
+  _Node(this.key, this.stats);
 }

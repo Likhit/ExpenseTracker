@@ -10,7 +10,6 @@ import 'package:expense_tracker/services/ledger_service.dart';
 import 'package:expense_tracker/services/query/ledger_filter.dart';
 import 'package:expense_tracker/services/query/ledger_group.dart';
 import 'package:expense_tracker/services/query/ledger_stats.dart';
-import 'package:expense_tracker/services/views/ledger_view.dart';
 
 void main() {
   late Directory tempDir;
@@ -48,13 +47,11 @@ void main() {
         deleted: deleted,
       );
 
-  Future<LedgerService> ledgerWith(List<LedgerView> views) =>
-      LedgerService.create(
+  Future<LedgerService> freshLedger() => LedgerService.create(
         accountsPath: '${tempDir.path}/accounts.jsonl',
         categoriesPath: '${tempDir.path}/categories.jsonl',
         currenciesPath: '${tempDir.path}/currencies.jsonl',
         transactionsPath: '${tempDir.path}/transactions.jsonl',
-        views: views,
       );
 
   setUp(() async {
@@ -66,31 +63,28 @@ void main() {
   });
 
   group('LedgerView lifecycle', () {
-    test('viewResult on a fresh ledger returns the empty tree', () async {
-      final ledger = await ledgerWith([
-        LedgerView(name: 'balances', groupBy: const [
-          GroupDimension.byAccount(),
-          GroupDimension.byCurrency(),
-        ]),
+    test('a freshly registered view returns the empty tree', () async {
+      final ledger = await freshLedger();
+      await ledger.register(name: 'balances', groupBy: const [
+        GroupDimension.byAccount(),
+        GroupDimension.byCurrency(),
       ]);
-      final result = ledger.viewResult('balances')!;
+      final result = ledger.viewResult('balances')!.result;
       expect(result.children, isEmpty);
       expect(result.stats.count, 0);
     });
 
     test('unknown view name returns null', () async {
-      final ledger = await ledgerWith([
-        LedgerView(name: 'balances'),
-      ]);
+      final ledger = await freshLedger();
+      await ledger.register(name: 'balances');
       expect(ledger.viewResult('nope'), isNull);
     });
 
-    test('duplicate view names rejected at construction', () async {
-      expect(
-        () => ledgerWith([
-          LedgerView(name: 'dup'),
-          LedgerView(name: 'dup'),
-        ]),
+    test('duplicate view names rejected at registration', () async {
+      final ledger = await freshLedger();
+      await ledger.register(name: 'dup');
+      await expectLater(
+        ledger.register(name: 'dup'),
         throwsArgumentError,
       );
     });
@@ -98,12 +92,11 @@ void main() {
 
   group('LedgerView push updates', () {
     test('first save is reflected in the view', () async {
-      final ledger = await ledgerWith([
-        LedgerView(name: 'totals'),
-      ]);
+      final ledger = await freshLedger();
+      await ledger.register(name: 'totals');
       await ledger.save(expense(id: 'tx-1', amount: '50'));
 
-      final result = ledger.viewResult('totals')!;
+      final result = ledger.viewResult('totals')!.result;
       expect(result.transactions, hasLength(1));
       expect(result.stats.count, 2);
       // -50 + 50 (same-currency balanced).
@@ -112,15 +105,14 @@ void main() {
     });
 
     test('grouped view buckets legs by their group key', () async {
-      final ledger = await ledgerWith([
-        LedgerView(
-          name: 'by-account',
-          groupBy: const [GroupDimension.byAccount()],
-        ),
-      ]);
+      final ledger = await freshLedger();
+      await ledger.register(
+        name: 'by-account',
+        groupBy: const [GroupDimension.byAccount()],
+      );
       await ledger.save(expense(id: 'tx-1', amount: '50'));
 
-      final result = ledger.viewResult('by-account')!;
+      final result = ledger.viewResult('by-account')!.result;
       final byAccount = {
         for (final c in result.children) (c.key as AccountKey).id: c,
       };
@@ -132,35 +124,33 @@ void main() {
 
     test('editing a transaction reverts the old version and applies the new',
         () async {
-      final ledger = await ledgerWith([
-        LedgerView(
-          name: 'by-account',
-          groupBy: const [GroupDimension.byAccount()],
-        ),
-      ]);
+      final ledger = await freshLedger();
+      await ledger.register(
+        name: 'by-account',
+        groupBy: const [GroupDimension.byAccount()],
+      );
       await ledger.save(expense(id: 'tx-1', amount: '50'));
       // Edit: bump the amount to $80.
       await ledger.save(expense(id: 'tx-1', amount: '80'));
 
-      final result = ledger.viewResult('by-account')!;
-      final chase = result.children
-          .firstWhere((c) => (c.key as AccountKey).id == const AccountId('chase'));
+      final result = ledger.viewResult('by-account')!.result;
+      final chase = result.children.firstWhere(
+          (c) => (c.key as AccountKey).id == const AccountId('chase'));
       expect(chase.stats.sumByCurrency,
           {const CurrencyCode('USD'): d('-80')});
       expect(chase.transactions, hasLength(1));
     });
 
     test('soft-deleting a transaction drops it from the view', () async {
-      final ledger = await ledgerWith([
-        LedgerView(name: 'totals'),
-      ]);
+      final ledger = await freshLedger();
+      await ledger.register(name: 'totals');
       final tx = expense(id: 'tx-1', amount: '50');
       await ledger.save(tx);
       await ledger.delete(tx);
 
-      final result = ledger.viewResult('totals')!;
-      // The default filter excludes deleted, so the view's leaf is
-      // empty: stats back to zero, transactions gone.
+      final result = ledger.viewResult('totals')!.result;
+      // The default filter excludes deleted, so the view's leaf is empty:
+      // stats back to zero, transactions gone.
       expect(result.transactions, isEmpty);
       expect(result.stats.count, 0);
       expect(result.stats.sumByCurrency,
@@ -168,63 +158,57 @@ void main() {
     });
 
     test('view filter excludes non-matching transactions', () async {
-      final ledger = await ledgerWith([
-        LedgerView(
-          name: 'food-only',
-          filter: const LedgerFilter(
-            categories: {CategoryPath('Food')},
-          ),
-        ),
-      ]);
+      final ledger = await freshLedger();
+      await ledger.register(
+        name: 'food-only',
+        filter: const LedgerFilter(categories: {CategoryPath('Food')}),
+      );
       await ledger.save(expense(
           id: 'tx-1', amount: '50', category: 'Food::Groceries'));
       await ledger.save(
           expense(id: 'tx-2', amount: '10', category: 'Transport::Taxi'));
 
-      final result = ledger.viewResult('food-only')!;
+      final result = ledger.viewResult('food-only')!.result;
       expect(result.transactions.map((t) => t.id),
           {const TransactionId('tx-1')});
-      // Only the Chase leg of tx-1 carries the Food category, so the
-      // sum is just the Chase outflow.
+      // Only the Chase leg of tx-1 carries the Food category, so the sum is
+      // just the Chase outflow.
       expect(result.stats.sumByCurrency,
           {const CurrencyCode('USD'): d('-50')});
     });
 
     test('multiple views with different filters maintained independently',
         () async {
-      final ledger = await ledgerWith([
-        LedgerView(name: 'food', filter: const LedgerFilter(categories: {
-          CategoryPath('Food'),
-        })),
-        LedgerView(name: 'transport',
-            filter: const LedgerFilter(categories: {
-          CategoryPath('Transport'),
-        })),
-      ]);
+      final ledger = await freshLedger();
+      await ledger.register(
+          name: 'food',
+          filter: const LedgerFilter(categories: {CategoryPath('Food')}));
+      await ledger.register(
+          name: 'transport',
+          filter: const LedgerFilter(categories: {CategoryPath('Transport')}));
       await ledger.save(expense(
           id: 'tx-1', amount: '50', category: 'Food::Groceries'));
       await ledger.save(
           expense(id: 'tx-2', amount: '20', category: 'Transport::Taxi'));
 
-      expect(ledger.viewResult('food')!.transactions.map((t) => t.id),
+      expect(ledger.viewResult('food')!.result.transactions.map((t) => t.id),
           {const TransactionId('tx-1')});
-      expect(ledger.viewResult('transport')!.transactions.map((t) => t.id),
+      expect(
+          ledger.viewResult('transport')!.result.transactions.map((t) => t.id),
           {const TransactionId('tx-2')});
     });
   });
 
   group('LedgerView seeding & rebuild', () {
-    test('LedgerService.create seeds views from an existing journal',
-        () async {
-      final first = await ledgerWith(const []);
+    test('register seeds the view from an existing journal', () async {
+      final first = await freshLedger();
       await first.save(expense(id: 'tx-1', amount: '50'));
       await first.save(expense(id: 'tx-2', amount: '20'));
 
-      // Reopen with a view registered; seeding replays the journal.
-      final reopened = await ledgerWith([
-        LedgerView(name: 'totals'),
-      ]);
-      final result = reopened.viewResult('totals')!;
+      // Reopen with a view registered; registration replays the journal.
+      final reopened = await freshLedger();
+      await reopened.register(name: 'totals');
+      final result = reopened.viewResult('totals')!.result;
       expect(result.transactions, hasLength(2));
       // 4 legs total (2 per tx); same-currency balanced.
       expect(result.stats.count, 4);
@@ -232,37 +216,33 @@ void main() {
 
     test('rebuildViews wipes and re-seeds from current journal state',
         () async {
-      final ledger = await ledgerWith([
-        LedgerView(name: 'totals'),
-      ]);
+      final ledger = await freshLedger();
+      await ledger.register(name: 'totals');
       await ledger.save(expense(id: 'tx-1', amount: '50'));
-      expect(ledger.viewResult('totals')!.transactions, hasLength(1));
+      expect(ledger.viewResult('totals')!.result.transactions, hasLength(1));
 
       await ledger.rebuildViews();
       // After rebuild the state matches the journal as it stands now.
-      expect(ledger.viewResult('totals')!.transactions, hasLength(1));
-      expect(ledger.viewResult('totals')!.stats.count, 2);
+      expect(ledger.viewResult('totals')!.result.transactions, hasLength(1));
+      expect(ledger.viewResult('totals')!.result.stats.count, 2);
     });
   });
 
   group('LedgerView parity with query()', () {
-    test('view matches one-shot query for the same filter/groupBy',
-        () async {
-      final ledger = await ledgerWith([
-        LedgerView(
-          name: 'by-account-currency',
-          groupBy: const [
-            GroupDimension.byAccount(),
-            GroupDimension.byCurrency(),
-          ],
-        ),
-      ]);
+    test('view matches one-shot query for the same filter/groupBy', () async {
+      final ledger = await freshLedger();
+      await ledger.register(
+        name: 'by-account-currency',
+        groupBy: const [
+          GroupDimension.byAccount(),
+          GroupDimension.byCurrency(),
+        ],
+      );
       await ledger.save(expense(id: 'tx-1', amount: '50'));
-      await ledger.save(
-          expense(id: 'tx-2', amount: '30', currency: 'EUR'));
+      await ledger.save(expense(id: 'tx-2', amount: '30', currency: 'EUR'));
       await ledger.save(expense(id: 'tx-3', amount: '10'));
 
-      final fromView = ledger.viewResult('by-account-currency')!;
+      final fromView = ledger.viewResult('by-account-currency')!.result;
       final fromQuery = await ledger.query(
         const LedgerFilter(),
         groupBy: const [
@@ -271,14 +251,10 @@ void main() {
         ],
       );
 
-      // Stats must match exactly (same Stats kinds, same per-currency
-      // sums). Tree structure: same root key, same set of leaf
-      // (account, currency) pairs with matching stats.
+      // Stats must match exactly, and the set of leaf (account, currency)
+      // pairs with their per-currency sums must agree.
       expect(fromView.stats, fromQuery.stats);
-
-      final viewLeafSums = _leafSumsByPath(fromView);
-      final querySums = _leafSumsByPath(fromQuery);
-      expect(viewLeafSums, querySums);
+      expect(_leafSumsByPath(fromView), _leafSumsByPath(fromQuery));
     });
   });
 }
