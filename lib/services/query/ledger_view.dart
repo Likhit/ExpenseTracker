@@ -44,12 +44,20 @@ class LedgerView {
   /// caller that needs a frozen view should copy what it reads.
   QueryResult get result => _result;
 
-  /// Wipes the maintained state and replays [txs]. Called on registration.
+  /// Wipes the maintained state and replays [txs]. Called on registration
+  /// when there's no fresh persisted snapshot to restore from.
   void seed(Iterable<Transaction> txs) {
     _result = QueryResult.empty(groupBy, template);
     for (final tx in txs) {
       _result.add(tx, filter, groupBy, template);
     }
+  }
+
+  /// Adopts a [tree] restored from a persisted snapshot as the maintained
+  /// state. Its leaves carry [Checkpoint] markers; subsequent saves stack
+  /// fresh rows on top via [applySave].
+  void restore(QueryResult tree) {
+    _result = tree;
   }
 
   /// Forwards a save to the tree: undo the old version's contribution, then

@@ -16,6 +16,7 @@ import 'query/ledger_filter.dart';
 import 'query/ledger_group.dart';
 import 'query/ledger_stats.dart';
 import 'query/ledger_view.dart';
+import 'query/view_store.dart';
 
 /// Single entry point for the double-entry engine.
 ///
@@ -41,39 +42,50 @@ class LedgerService {
   /// Named maintained views, keyed by name for O(1) lookup.
   final Map<String, LedgerView> _viewsByName = {};
 
+  /// Optional persistence for maintained views. When present, snapshots are
+  /// written through after every transaction write and restored on [register].
+  final ViewStore? _viewStore;
+
   LedgerService._({
     required String accountsPath,
     required String categoriesPath,
     required String currenciesPath,
     required String transactionsPath,
+    required ViewStore? viewStore,
   })  : _accounts = AccountRepository(filePath: accountsPath),
         _categories = CategoryRepository(filePath: categoriesPath),
         _currencies = CurrencyRepository(filePath: currenciesPath),
-        _transactions = TransactionRepository(filePath: transactionsPath);
+        _transactions = TransactionRepository(filePath: transactionsPath),
+        _viewStore = viewStore;
 
   /// Constructs a [LedgerService] over the given JSONL paths. Ensures the
   /// built-in Expense and Income accounts are present on disk before
-  /// returning. Register maintained views afterwards with [register].
+  /// returning. Register maintained views afterwards with [register]; pass a
+  /// [viewStore] to persist them across restarts.
   static Future<LedgerService> create({
     required String accountsPath,
     required String categoriesPath,
     required String currenciesPath,
     required String transactionsPath,
+    ViewStore? viewStore,
   }) async {
     final ledger = LedgerService._(
       accountsPath: accountsPath,
       categoriesPath: categoriesPath,
       currenciesPath: currenciesPath,
       transactionsPath: transactionsPath,
+      viewStore: viewStore,
     );
     await ledger._ensureBuiltinAccounts();
     return ledger;
   }
 
-  /// Registers a maintained [LedgerView] under [name] and seeds it by
-  /// replaying the journal once. Subsequent saves keep it fresh via the
-  /// push-update path. Throws [ArgumentError] on a duplicate name. Returns
-  /// the registered view, whose current tree is read via [LedgerView.result].
+  /// Registers a maintained [LedgerView] under [name]. If a [viewStore] holds
+  /// a snapshot whose watermark still matches the journal tip, the view is
+  /// restored from it (no replay); otherwise it is seeded by replaying the
+  /// journal and the fresh snapshot is persisted. Subsequent saves keep it
+  /// fresh via the push-update path. Throws [ArgumentError] on a duplicate
+  /// name. Returns the view, whose tree is read via [LedgerView.result].
   Future<LedgerView> register({
     required String name,
     LedgerFilter filter = const LedgerFilter(),
@@ -89,7 +101,17 @@ class LedgerService {
       groupBy: groupBy,
       template: template,
     );
-    view.seed(await _transactions.getAll());
+
+    final store = _viewStore;
+    final tip = await _transactions.currentTip();
+    final snapshot = store == null ? null : await store.load(name);
+    if (snapshot != null && snapshot.watermark == tip) {
+      view.restore(snapshot.tree);
+    } else {
+      view.seed(await _transactions.getAll());
+      await store?.save(name, view.result, tip);
+    }
+
     _viewsByName[name] = view;
     return view;
   }
@@ -156,6 +178,7 @@ class LedgerService {
         final old = await _transactions.get(t.id);
         await _transactions.save(t);
         _notifyViews(old, t);
+        await _persistViews();
       default:
         throw StateError('Unsupported entity type: ${entity.runtimeType}');
     }
@@ -175,6 +198,7 @@ class LedgerService {
         final old = await _transactions.get(t.id);
         final deleted = await _transactions.delete(t);
         _notifyViews(old, deleted);
+        await _persistViews();
       default:
         throw StateError('Unsupported entity type: ${entity.runtimeType}');
     }
@@ -183,6 +207,17 @@ class LedgerService {
   void _notifyViews(Transaction? old, Transaction newVersion) {
     for (final view in _viewsByName.values) {
       view.applySave(old, newVersion);
+    }
+  }
+
+  /// Write-through: persist every maintained view at the current journal tip.
+  /// No-op without a [ViewStore] or when no views are registered.
+  Future<void> _persistViews() async {
+    final store = _viewStore;
+    if (store == null || _viewsByName.isEmpty) return;
+    final tip = await _transactions.currentTip();
+    for (final view in _viewsByName.values) {
+      await store.save(view.name, view.result, tip);
     }
   }
 

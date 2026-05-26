@@ -28,6 +28,30 @@ abstract interface class Stat<V> {
   /// Folds [other] of the same kind into this stat. Used to roll up a
   /// node's stats from its children.
   Stat<V> combine(covariant Stat<V> other);
+
+  /// Stable tag identifying this stat kind, used to persist and later
+  /// reconstruct it (see [statFromJson]).
+  String get kind;
+
+  /// JSON-encodable snapshot of this stat's value, for persistence.
+  Object toJson();
+}
+
+/// Reconstructs a [Stat] from its persisted [kind] tag and [json] value.
+/// The inverse of [Stat.toJson]; new stat kinds register a case here.
+Stat statFromJson(String kind, Object? json) {
+  switch (kind) {
+    case 'count':
+      return CountStat(value: json as int);
+    case 'sumByCurrency':
+      final map = (json as Map).cast<String, Object?>();
+      return SumByCurrencyStat(value: {
+        for (final entry in map.entries)
+          CurrencyCode(entry.key): Decimal.parse(entry.value as String),
+      });
+    default:
+      throw ArgumentError.value(kind, 'kind', 'Unknown stat kind');
+  }
 }
 
 /// Counts the legs contributing to a bucket. Each non-deleted leg adds
@@ -47,6 +71,12 @@ class CountStat implements Stat<int> {
   @override
   CountStat combine(covariant CountStat other) =>
       CountStat(value: value + other.value);
+
+  @override
+  String get kind => 'count';
+
+  @override
+  Object toJson() => value;
 
   @override
   bool operator ==(Object other) => other is CountStat && other.value == value;
@@ -89,6 +119,13 @@ class SumByCurrencyStat implements Stat<Map<CurrencyCode, Decimal>> {
     });
     return SumByCurrencyStat(value: merged);
   }
+
+  @override
+  String get kind => 'sumByCurrency';
+
+  @override
+  Object toJson() =>
+      {for (final e in value.entries) e.key.value: e.value.toString()};
 
   @override
   bool operator ==(Object other) =>
