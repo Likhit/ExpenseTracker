@@ -99,6 +99,10 @@ class Repository<Id, T extends JsonlStorable<Id>>
     return null;
   }
 
+  /// The current tip `lineId` of this file (or [LineId.first] when empty).
+  /// Used as the watermark when persisting maintained views.
+  Future<LineId> currentTip() => _ensureTip();
+
   Future<T> save(T entity) async {
     final prev = await _ensureTip();
     final lineId = _newLineId();

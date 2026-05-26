@@ -6,6 +6,7 @@ import '../../models/path_helper.dart';
 import '../../models/transaction.dart';
 
 part 'ledger_group.freezed.dart';
+part 'ledger_group.g.dart';
 
 /// Time-bucket granularity for [GroupDimension.byTime].
 enum TimeBucket { day, week, month, year }
@@ -13,7 +14,7 @@ enum TimeBucket { day, week, month, year }
 /// One axis to group by. Compose multiple dimensions into a list for
 /// nested grouping; `[ByAccount, ByCurrency]` produces a tree keyed by
 /// account at the top level, then by currency under each account.
-@freezed
+@Freezed(unionKey: 'd')
 sealed class GroupDimension with _$GroupDimension {
   const GroupDimension._();
 
@@ -29,6 +30,9 @@ sealed class GroupDimension with _$GroupDimension {
   const factory GroupDimension.byCurrency() = ByCurrency;
 
   const factory GroupDimension.byTime(TimeBucket bucket) = ByTime;
+
+  factory GroupDimension.fromJson(Map<String, dynamic> json) =>
+      _$GroupDimensionFromJson(json);
 
   /// Resolves the group key for [leg] under this dimension. [tx] is
   /// passed for transaction-level fields (currently only [ByTime] uses
@@ -67,11 +71,17 @@ sealed class GroupDimension with _$GroupDimension {
 /// produces its own variant; [GroupKey.none] is the catch-all for legs
 /// that lack the grouping field (e.g., legs without a categoryPath when
 /// grouping by category) and also marks the root of every result tree.
-@freezed
+@Freezed(unionKey: 't')
 sealed class GroupKey with _$GroupKey {
-  const factory GroupKey.account(AccountId id) = AccountKey;
-  const factory GroupKey.category(CategoryPath path) = CategoryKey;
-  const factory GroupKey.currency(CurrencyCode code) = CurrencyKey;
+  const factory GroupKey.account(@AccountIdConverter() AccountId id) =
+      AccountKey;
+  const factory GroupKey.category(@CategoryPathConverter() CategoryPath path) =
+      CategoryKey;
+  const factory GroupKey.currency(@CurrencyCodeConverter() CurrencyCode code) =
+      CurrencyKey;
   const factory GroupKey.time(DateTime bucketStart) = TimeKey;
   const factory GroupKey.none() = NoneKey;
+
+  factory GroupKey.fromJson(Map<String, dynamic> json) =>
+      _$GroupKeyFromJson(json);
 }

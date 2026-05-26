@@ -6,6 +6,7 @@ import '../../models/path_helper.dart';
 import '../../models/transaction.dart';
 
 part 'ledger_filter.freezed.dart';
+part 'ledger_filter.g.dart';
 
 /// Predicate over the journal. Splits naturally into transaction-level
 /// constraints (date, type, deleted) and leg-level constraints (account,
@@ -21,17 +22,20 @@ abstract class LedgerFilter with _$LedgerFilter {
   const LedgerFilter._();
 
   const factory LedgerFilter({
-    Set<AccountId>? accounts,
-    Set<CurrencyCode>? currencies,
-    Set<CategoryPath>? categories,
-    Set<AccountId>? excludeAccounts,
-    Set<CurrencyCode>? excludeCurrencies,
-    Set<CategoryPath>? excludeCategories,
+    @AccountIdConverter() Set<AccountId>? accounts,
+    @CurrencyCodeConverter() Set<CurrencyCode>? currencies,
+    @CategoryPathConverter() Set<CategoryPath>? categories,
+    @AccountIdConverter() Set<AccountId>? excludeAccounts,
+    @CurrencyCodeConverter() Set<CurrencyCode>? excludeCurrencies,
+    @CategoryPathConverter() Set<CategoryPath>? excludeCategories,
     DateTime? from,
     DateTime? to,
     Set<TransactionType>? types,
     @Default(false) bool includeDeleted,
   }) = _LedgerFilter;
+
+  factory LedgerFilter.fromJson(Map<String, dynamic> json) =>
+      _$LedgerFilterFromJson(json);
 
   /// Returns the legs of [tx] that satisfy this filter. Empty list if
   /// the transaction itself is filtered out (e.g., wrong date, deleted),

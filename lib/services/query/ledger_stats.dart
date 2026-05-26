@@ -26,6 +26,17 @@ class Stats implements Stat<Stats> {
   factory Stats.of(List<Stat> stats) =>
       Stats._({for (final s in stats) s.runtimeType: s});
 
+  /// Reconstructs a [Stats] from [toJson] output: a `{kind: value}` map,
+  /// each entry rebuilt via [statFromJson].
+  factory Stats.fromJson(Map<String, Object?> json) {
+    final stats = <Type, Stat>{};
+    for (final entry in json.entries) {
+      final stat = statFromJson(entry.key, entry.value);
+      stats[stat.runtimeType] = stat;
+    }
+    return Stats._(stats);
+  }
+
   /// The default template: count + per-currency sum. Used by
   /// `LedgerService.query` when no custom template is supplied.
   factory Stats.defaults() => Stats.of(const [
@@ -62,6 +73,15 @@ class Stats implements Stat<Stats> {
     }
     return Stats._(result);
   }
+
+  /// [Stats] is itself a [Stat]; its `kind` tags the composite.
+  @override
+  String get kind => 'stats';
+
+  /// A `{kind: value}` map of the contained stats, each via [Stat.toJson].
+  @override
+  Object toJson() =>
+      {for (final stat in _stats.values) stat.kind: stat.toJson()};
 
   /// Typed lookup of a stat by its concrete kind.
   T? get<T extends Stat>() => _stats[T] as T?;
@@ -218,11 +238,54 @@ sealed class QueryResult {
   bool _prune(List<GroupDimension> groupBy, int depth) {
     final self = this;
     if (depth == groupBy.length) {
-      return (self as LeafResult).source.materialized.isEmpty && depth > 0;
+      final source = (self as LeafResult).source;
+      // A checkpointed leaf may still hold unhydrated rows behind the
+      // watermark, so emptiness of the in-memory overlay can't condemn it.
+      return source.materialized.isEmpty && source.checkpoint == null &&
+          depth > 0;
     }
     self as NodeResult;
     self.children.removeWhere((child) => child._prune(groupBy, depth + 1));
     return self.children.isEmpty && depth > 0;
+  }
+
+  /// JSON snapshot of the tree: each node's [key] and [stats], plus a leaf's
+  /// `leaf: true` marker or a node's serialized `children`. Transaction rows
+  /// are deliberately *not* serialized — a restored leaf carries a
+  /// [Checkpoint] instead (see [QueryResult.fromJson]).
+  Map<String, Object?> toJson() {
+    final self = this;
+    if (self is LeafResult) {
+      return {'key': self.key.toJson(), 'stats': self.stats.toJson(), 'leaf': true};
+    }
+    self as NodeResult;
+    return {
+      'key': self.key.toJson(),
+      'stats': self.stats.toJson(),
+      'children': [for (final child in self.children) child.toJson()],
+    };
+  }
+
+  /// Rebuilds a tree from [toJson] output. Leaves come back with an empty
+  /// materialized set and a [Checkpoint] marker, since rows aren't persisted.
+  factory QueryResult.fromJson(Map<String, Object?> json) {
+    final key = GroupKey.fromJson((json['key'] as Map).cast<String, dynamic>());
+    final stats = Stats.fromJson((json['stats'] as Map).cast<String, Object?>());
+    if (json['leaf'] == true) {
+      return LeafResult(
+        key: key,
+        source: const TransactionSource(checkpoint: Checkpoint()),
+        stats: stats,
+      );
+    }
+    return NodeResult(
+      key: key,
+      children: [
+        for (final child in json['children'] as List)
+          QueryResult.fromJson((child as Map).cast<String, Object?>()),
+      ],
+      stats: stats,
+    );
   }
 }
 
@@ -271,28 +334,50 @@ extension QueryResultOps on QueryResult {
       };
 }
 
-/// A [LeafResult]'s transactions. For now just the materialized rows behind
-/// the bucket; Phase 1.8 PR C will add an unhydrated checkpoint base (rows
-/// folded in before a disk-restored view's watermark) alongside these, so a
-/// leaf can stay lazy until a drill-down asks for its rows.
+/// A [LeafResult]'s transactions: the [materialized] rows in hand, plus an
+/// optional [checkpoint] standing for rows that exist on disk but haven't been
+/// loaded.
+///
+/// A freshly-built or in-memory leaf has `checkpoint == null` — every
+/// contributing row is in [materialized]. A leaf restored from a persisted
+/// view (see `ViewStore`) carries a [Checkpoint] with [materialized] holding
+/// only the rows saved since the snapshot; the historical rows behind the
+/// watermark stay unhydrated until a consumer asks for them (resolution is a
+/// later phase). The `transactions` getter returns only [materialized], so a
+/// checkpointed leaf reports the rows it has, not the ones still on disk.
 class TransactionSource {
   final List<Transaction> materialized;
+  final Checkpoint? checkpoint;
 
-  const TransactionSource({this.materialized = const []});
+  const TransactionSource({this.materialized = const [], this.checkpoint});
+}
+
+/// Marker on a restored [LeafResult] meaning "this bucket's stats are complete,
+/// but its historical rows (folded in before the view's watermark) are not
+/// loaded." Carries no data yet — its presence is the signal; lazy resolution
+/// of the rows lands in a later phase.
+class Checkpoint {
+  const Checkpoint();
 }
 
 TransactionSource _stampInto(TransactionSource source, Transaction row) =>
-    TransactionSource(materialized: [
-      for (final t in source.materialized)
-        if (t.id != row.id) t,
-      row,
-    ]);
+    TransactionSource(
+      checkpoint: source.checkpoint,
+      materialized: [
+        for (final t in source.materialized)
+          if (t.id != row.id) t,
+        row,
+      ],
+    );
 
 TransactionSource _unstampFrom(TransactionSource source, TransactionId id) =>
-    TransactionSource(materialized: [
-      for (final t in source.materialized)
-        if (t.id != id) t,
-    ]);
+    TransactionSource(
+      checkpoint: source.checkpoint,
+      materialized: [
+        for (final t in source.materialized)
+          if (t.id != id) t,
+      ],
+    );
 
 Iterable<Transaction> _dedupTransactions(Iterable<Transaction> txs) sync* {
   final seen = <TransactionId>{};

@@ -64,6 +64,7 @@ lib/
       ledger_stats.dart             # Stats container + sealed QueryResult + TransactionSource
       stat.dart                     # Stat<V> functor + built-ins
       ledger_view.dart              # LedgerView: a named query kept fresh on save
+      view_store.dart               # sembast persistence for maintained views
 
   ui/                               # see "UX Specification" below
     screens/
@@ -82,7 +83,7 @@ lib/
 - `path_provider` — app data directories
 - `intl` — date/number formatting
 - `fuzzy` or similar — fuzzy search for category path input
-- `sembast` — Phase 1.8/C, persistent KV cache for pre-computed views
+- `sembast` — pure-Dart KV store persisting maintained views (Phase 1.8/C, `ViewStore`)
 
 ## Engine Conventions
 
@@ -133,10 +134,10 @@ See `services/query/` for the filter/group/stats engine.
 - **`LedgerFilter`** — optional include/exclude constraints on accounts, currencies, categories, plus tx-level date range, types, and includeDeleted. Category match is segment-aware: `Food` matches `Food::Groceries` but not `Foodie`.
 - **`GroupDimension`** — sealed: `byAccount`, `byCategory({depth})`, `byCurrency`, `byTime(TimeBucket)`. Compose by passing a list to `query`.
 - **`GroupKey`** — one variant per dimension, plus `none()` for legs missing the dimension (e.g., a Chase leg with no categoryPath under `byCategory`) and for the root of every result tree.
-- **`Stat<V>`** — incrementally maintainable functor: `value`, `apply(leg, tx)`, `combine(other)`. **Apply respects `tx.deleted` as its sign** — a deleted leg contributes the *negative* of an active one. That single convention covers both one-shot aggregation and the "revert by re-applying with deleted flipped" incremental path. Built-ins: `CountStat`, `SumByCurrencyStat`.
+- **`Stat<V>`** — incrementally maintainable functor: `value`, `apply(leg, tx)`, `combine(other)`, plus `kind` + `toJson()` for persistence (`statFromJson(kind, json)` reconstructs). **Apply respects `tx.deleted` as its sign** — a deleted leg contributes the *negative* of an active one. That single convention covers both one-shot aggregation and the "revert by re-applying with deleted flipped" incremental path. Built-ins: `CountStat`, `SumByCurrencyStat`.
 - **`Stats`** — typed container of `Stat`s (`Map<Type, Stat>`). `Stats.of([...])` for a custom template; `Stats.defaults()` for count + sumByCurrency. Convenience getters `stats.count` and `stats.sumByCurrency`.
 - **`QueryResult`** — a plain **mutable** sealed tree (not `freezed`): `LeafResult { key, source, stats }` and `NodeResult { key, children, stats }`. `stats` is stored on every node. `transactions` and `children` are exposed via an extension on `QueryResult` that returns `Iterable` — node returns a lazy dedup walk; leaf returns its `source`'s materialized rows. It's not serialized and nothing compares it by value, so it stays mutable. **The tree owns the fold**: `QueryResult.add(tx, filter, groupBy, template)` routes each matching leg down its group path, bumps stats at every node, and records the row at the leaf; `remove` is its inverse (re-apply with `deleted` flipped, forget the row, prune emptied buckets). `query` builds a result by `add`-ing every transaction into `QueryResult.empty(...)`; `LedgerView` maintains its tree by forwarding each save to `remove`/`add`. The traversal/fold lives in exactly one place.
-- **`TransactionSource`** — a leaf's rows. Currently just the `materialized` list behind the bucket. PR C will add an unhydrated checkpoint base (rows folded in before a disk-restored view's watermark) alongside it so a leaf can stay lazy until a drill-down asks for its rows — that lands with the persistence work, not before.
+- **`TransactionSource`** — a leaf's rows: the `materialized` list in hand, plus an optional `Checkpoint` marker. Fresh/in-memory leaves have `checkpoint == null`. A leaf restored from a persisted view carries a `Checkpoint` (rows aren't serialized) with `materialized` holding only rows saved *since* the snapshot; the historical rows behind the watermark stay unhydrated (lazy resolution is a later phase). The `transactions` getter returns only `materialized`, so a checkpointed leaf reports the rows it has — and `_prune` never drops a checkpointed leaf.
 
 ### Query semantics
 `ledger.query(filter, {groupBy})`:
@@ -390,7 +391,9 @@ Every report shares a top filter bar (date range, account, category). Filter sta
 
 When wiring providers in Phase 2, expose `LedgerService` through a single Riverpod provider; derive read-side providers (`accountsProvider`, `categoriesProvider`, `transactionsProvider`, plus query-backed `balanceProvider`, `monthlySpendingProvider`, etc.) from it. Writes always go through `ledger.save` / `delete` — never reach into a repository directly from the UI.
 
-Pre-computed views (`LedgerView`, Phase 1.8 PRs B/C) are the right abstraction for any report or dashboard card that re-renders frequently. Register one with `ledger.register(name:, filter:, groupBy:, template:)` and read its current tree via `ledger.viewResult(name).result` (which throws if no such view is registered). A `LedgerView` *is* a named `(filter, groupBy, stats template)` plus the `QueryResult` it keeps fresh: it maintains the tree directly — every save walks each leg's root→leaf path and `apply`s it to every node on the way down (an edit/delete first re-applies the old version with `deleted` flipped to subtract), so there's no rebuild or roll-up. Each card maps to one named view; the provider listens for view updates and rebuilds on change.
+Pre-computed views (`LedgerView`, Phase 1.8) are the right abstraction for any report or dashboard card that re-renders frequently. Register one with `ledger.register(name:, filter:, groupBy:, template:)` and read its current tree via `ledger.viewResult(name).result` (which throws if no such view is registered). A `LedgerView` *is* a named `(filter, groupBy, stats template)` plus the `QueryResult` it keeps fresh: it forwards each save to `QueryResult.remove`/`add` (the same fold `query` uses), so there's no rebuild or roll-up. Each card maps to one named view; the provider listens for view updates and rebuilds on change.
+
+**Persistence (`ViewStore`, PR C):** pass a `ViewStore` (wrapping a sembast `Database`) to `LedgerService.create` and views survive restarts. Per view it stores the **config** (`filter`, `groupBy`, `template`), the serialized stats tree (rows are *not* persisted), and a **watermark** — the transactions-journal tip `lineId` at snapshot time. Writes are **write-through**: every transaction save re-persists the maintained views at the new tip. On `register`, a snapshot is **restored** (no replay, leaves carry a `Checkpoint`) only when *both* its config equals the requested view's config (a view's identity is its name **and** its config — the two can drift across app versions) **and** its watermark still equals the journal tip; otherwise the view is seeded by replaying the journal and re-persisted. Config comparison is by value: `LedgerFilter`/`GroupDimension` are freezed (so `==` is order-independent for the include/exclude sets) and serialize via freezed json. The `Database` is owned by the caller (file-backed in production via `databaseFactoryIo`, in-memory in tests via `newDatabaseFactoryMemory`), keeping the engine independent of the sembast factory choice.
 
 ## Per-phase workflow
 
