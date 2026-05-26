@@ -145,9 +145,6 @@ void main() {
       transactionsPath: '${tempDir.path}/transactions.jsonl',
     );
     for (final tx in fixtureTransactions()) {
-      // Bypass validation for tx-5 (cross-currency without rate metadata
-      // isn't the case here, but we also want to persist the deleted
-      // version directly). Use the raw repo via saveAll for setup speed.
       await ledger.save(tx);
     }
   });
