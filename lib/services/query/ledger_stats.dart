@@ -269,7 +269,7 @@ sealed class QueryResult {
   /// Rebuilds a tree from [toJson] output. Leaves come back with an empty
   /// materialized set and a [Checkpoint] marker, since rows aren't persisted.
   factory QueryResult.fromJson(Map<String, Object?> json) {
-    final key = GroupKey.fromJson((json['key'] as Map).cast<String, Object?>());
+    final key = GroupKey.fromJson((json['key'] as Map).cast<String, dynamic>());
     final stats = Stats.fromJson((json['stats'] as Map).cast<String, Object?>());
     if (json['leaf'] == true) {
       return LeafResult(

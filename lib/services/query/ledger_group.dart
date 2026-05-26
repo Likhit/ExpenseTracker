@@ -6,6 +6,7 @@ import '../../models/path_helper.dart';
 import '../../models/transaction.dart';
 
 part 'ledger_group.freezed.dart';
+part 'ledger_group.g.dart';
 
 /// Time-bucket granularity for [GroupDimension.byTime].
 enum TimeBucket { day, week, month, year }
@@ -67,35 +68,17 @@ sealed class GroupDimension with _$GroupDimension {
 /// produces its own variant; [GroupKey.none] is the catch-all for legs
 /// that lack the grouping field (e.g., legs without a categoryPath when
 /// grouping by category) and also marks the root of every result tree.
-@freezed
+@Freezed(unionKey: 't')
 sealed class GroupKey with _$GroupKey {
-  const GroupKey._();
-
-  const factory GroupKey.account(AccountId id) = AccountKey;
-  const factory GroupKey.category(CategoryPath path) = CategoryKey;
-  const factory GroupKey.currency(CurrencyCode code) = CurrencyKey;
+  const factory GroupKey.account(@AccountIdConverter() AccountId id) =
+      AccountKey;
+  const factory GroupKey.category(@CategoryPathConverter() CategoryPath path) =
+      CategoryKey;
+  const factory GroupKey.currency(@CurrencyCodeConverter() CurrencyCode code) =
+      CurrencyKey;
   const factory GroupKey.time(DateTime bucketStart) = TimeKey;
   const factory GroupKey.none() = NoneKey;
 
-  /// Tagged JSON for persistence. Hand-written (rather than generated) so the
-  /// extension-type id wrappers serialize to their bare string value.
-  Map<String, Object?> toJson() => switch (this) {
-        AccountKey(:final id) => {'t': 'account', 'v': id.value},
-        CategoryKey(:final path) => {'t': 'category', 'v': path.value},
-        CurrencyKey(:final code) => {'t': 'currency', 'v': code.value},
-        TimeKey(:final bucketStart) =>
-          {'t': 'time', 'v': bucketStart.toIso8601String()},
-        NoneKey() => {'t': 'none'},
-      };
-
-  // Static (not a `factory fromJson`) so freezed doesn't try to wire up
-  // json_serializable for the union's extension-type fields.
-  static GroupKey fromJson(Map<String, Object?> json) => switch (json['t']) {
-        'account' => GroupKey.account(AccountId(json['v'] as String)),
-        'category' => GroupKey.category(CategoryPath(json['v'] as String)),
-        'currency' => GroupKey.currency(CurrencyCode(json['v'] as String)),
-        'time' => GroupKey.time(DateTime.parse(json['v'] as String)),
-        'none' => const GroupKey.none(),
-        _ => throw ArgumentError.value(json['t'], 't', 'Unknown GroupKey tag'),
-      };
+  factory GroupKey.fromJson(Map<String, dynamic> json) =>
+      _$GroupKeyFromJson(json);
 }
