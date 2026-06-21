@@ -395,3 +395,10 @@ hs_err_pid*
 
 # End of https://www.toptal.com/developers/gitignore/api/dart,flutter,android,androidstudio,cmake,jetbrains
 
+# Project-specific exceptions to the generated rules above.
+# .env* would otherwise hide our direnv entry-point.
+!.envrc
+# This is an application, not a library — pin dependency versions for
+# everyone, contrary to the boilerplate's library-oriented default.
+!pubspec.lock
+
