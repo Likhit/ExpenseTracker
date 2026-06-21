@@ -9,6 +9,10 @@ android {
     namespace = "com.expensetracker.expense_tracker"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
+    // Pin to the version pre-installed in flake.nix. AGP 8.11 defaults to
+    // build-tools 35.0.0, which can't be auto-installed into the read-only
+    // /nix/store SDK dir.
+    buildToolsVersion = "36.0.0"
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
