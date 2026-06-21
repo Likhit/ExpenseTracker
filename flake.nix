@@ -23,14 +23,17 @@
 
         androidSdk = android-nixpkgs.sdk.${system} (sdkPkgs: with sdkPkgs; [
           cmdline-tools-latest
+          # 36 for the app (pinned in app/build.gradle.kts); 35 for Flutter
+          # plugin subprojects (file_picker etc.) that default to AGP 8.11's
+          # build-tools 35.0.0 and don't expose an override.
           build-tools-36-0-0
+          build-tools-35-0-0
           platform-tools
           platforms-android-36
           emulator
           system-images-android-34-google-apis-x86-64
-          # Pre-install the NDK Flutter expects (flutter.ndkVersion in
-          # app/build.gradle.kts). AGP can't auto-install into the read-only
-          # /nix/store SDK dir, so the version has to be declared here.
+          # Pre-install the NDK pinned in app/build.gradle.kts. AGP can't
+          # auto-install into the read-only /nix/store SDK dir.
           ndk-28-2-13676358
         ]);
 
