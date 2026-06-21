@@ -1,6 +1,7 @@
 import 'package:path_provider/path_provider.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 
+import '../app_info.dart';
 import '../models/account.dart';
 import '../models/category.dart';
 import '../models/currency.dart';
@@ -15,12 +16,16 @@ part 'ledger_provider.g.dart';
 /// service that the UI keeps watching for its entire lifetime.
 @Riverpod(keepAlive: true)
 Future<LedgerService> ledger(Ref ref) async {
+  // Scope our JSONL files under an app-named subdirectory so we don't litter
+  // the user's documents root (and so they're easy to find for backup or the
+  // future sync-folder picker). JsonlStore creates parents on first write.
   final dir = await getApplicationDocumentsDirectory();
+  final appDir = '${dir.path}/$appName';
   final service = await LedgerService.create(
-    accountsPath: '${dir.path}/accounts.jsonl',
-    categoriesPath: '${dir.path}/categories.jsonl',
-    currenciesPath: '${dir.path}/currencies.jsonl',
-    transactionsPath: '${dir.path}/transactions.jsonl',
+    accountsPath: '$appDir/accounts.jsonl',
+    categoriesPath: '$appDir/categories.jsonl',
+    currenciesPath: '$appDir/currencies.jsonl',
+    transactionsPath: '$appDir/transactions.jsonl',
   );
   ref.onDispose(service.dispose);
   return service;
