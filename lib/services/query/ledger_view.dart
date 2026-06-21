@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import '../../models/transaction.dart';
 import 'ledger_filter.dart';
 import 'ledger_group.dart';
@@ -20,6 +22,13 @@ class LedgerView {
 
   /// The maintained tree, mutated in place by [QueryResult.add]/[remove].
   QueryResult _result;
+
+  /// Fires after every mutation ([applySave], [seed], [restore]) — used by
+  /// reactivity layers (e.g. Riverpod providers) to re-read [result], since
+  /// the tree is mutated in place and `==` won't catch the change.
+  final StreamController<void> _changesController =
+      StreamController<void>.broadcast();
+  Stream<void> get changes => _changesController.stream;
 
   LedgerView({
     required String name,
@@ -51,6 +60,7 @@ class LedgerView {
     for (final tx in txs) {
       _result.add(tx, filter, groupBy, template);
     }
+    _changesController.add(null);
   }
 
   /// Adopts a [tree] restored from a persisted snapshot as the maintained
@@ -58,6 +68,7 @@ class LedgerView {
   /// fresh rows on top via [applySave].
   void restore(QueryResult tree) {
     _result = tree;
+    _changesController.add(null);
   }
 
   /// Forwards a save to the tree: undo the old version's contribution, then
@@ -65,5 +76,9 @@ class LedgerView {
   void applySave(Transaction? oldVersion, Transaction newVersion) {
     if (oldVersion != null) _result.remove(oldVersion, filter, groupBy);
     _result.add(newVersion, filter, groupBy, template);
+    _changesController.add(null);
   }
+
+  /// Closes the [changes] stream; call when discarding the view.
+  Future<void> dispose() => _changesController.close();
 }
