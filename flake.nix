@@ -31,6 +31,10 @@
           platform-tools
           platforms-android-36
           platforms-android-35
+          # CMake the Flutter Gradle plugin's JNI build expects; the system
+          # cmake from linuxBuildDeps isn't picked up here because AGP
+          # specifically asks for the SDK-managed version.
+          cmake-3-22-1
           emulator
           system-images-android-34-google-apis-x86-64
           # Pre-install the NDK pinned in app/build.gradle.kts. AGP can't
