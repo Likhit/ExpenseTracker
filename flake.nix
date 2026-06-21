@@ -55,6 +55,10 @@
           xorg.libX11
           libGL
           sysprof
+          # glib's .pc declares `Requires.private: sysprof-capture-4`, whose .pc
+          # lives in this separate package (not in `sysprof` itself). Without
+          # it, pkg-config warns every time it processes glib.
+          libsysprof-capture
         ];
 
         # Runtime deps needed by the built Flutter Linux app
