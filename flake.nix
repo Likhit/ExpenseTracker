@@ -28,6 +28,10 @@
           platforms-android-36
           emulator
           system-images-android-34-google-apis-x86-64
+          # Pre-install the NDK Flutter expects (flutter.ndkVersion in
+          # app/build.gradle.kts). AGP can't auto-install into the read-only
+          # /nix/store SDK dir, so the version has to be declared here.
+          ndk-28-2-13676358
         ]);
 
         # The host's nix post-build hook normally chmods ELF binaries that
