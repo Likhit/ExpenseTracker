@@ -8,10 +8,12 @@ plugins {
 android {
     namespace = "com.expensetracker.expense_tracker"
     compileSdk = flutter.compileSdkVersion
-    ndkVersion = flutter.ndkVersion
-    // Pin to the version pre-installed in flake.nix. AGP 8.11 defaults to
-    // build-tools 35.0.0, which can't be auto-installed into the read-only
-    // /nix/store SDK dir.
+    // Pin both versions to what's pre-installed in flake.nix — neither can
+    // be auto-installed into the read-only /nix/store SDK dir, so we don't
+    // want to silently follow Flutter's or AGP's defaults. Bumping Flutter
+    // via `nix flake update` should update both these literals AND the
+    // matching entries in flake.nix together.
+    ndkVersion = "28.2.13676358"
     buildToolsVersion = "36.0.0"
 
     compileOptions {
