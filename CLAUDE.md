@@ -67,11 +67,23 @@ lib/
       ledger_view.dart              # LedgerView: a named query kept fresh on save
       view_store.dart               # sembast persistence for maintained views
 
+  app.dart                          # MaterialApp + RootGate (loading/conflict/shell)
+
+  providers/                        # Riverpod providers (@riverpod codegen)
+    ledger_provider.dart            # ledger + ledgerState + accounts/categories/currencies/transactions
+
   ui/                               # see "UX Specification" below
     screens/
+      home_screen.dart              # (Phase 2.1: placeholder)
+      transactions_screen.dart      # (Phase 2.1: placeholder)
+      accounts_screen.dart          # (Phase 2.1: placeholder)
+      reports_screen.dart           # (Phase 2.1: placeholder)
+      settings_screen.dart          # (Phase 2.1: placeholder)
+      loading_screen.dart           # splash while ledgerProvider resolves
+      conflict_screen.dart          # gate when sync surfaced EntityConflicts
     widgets/
-
-  providers/                        # Riverpod providers
+      app_shell.dart                # adaptive nav (NavigationBar < 600px, NavigationRail >=)
+      coming_soon.dart              # shared placeholder body
 ```
 
 ### Key Dependencies
@@ -396,6 +408,8 @@ Every report shares a top filter bar (date range, account, category). Filter sta
 ## Engine ↔ UI contract
 
 When wiring providers in Phase 2, expose `LedgerService` through a single Riverpod provider; derive read-side providers (`accountsProvider`, `categoriesProvider`, `transactionsProvider`, plus query-backed `balanceProvider`, `monthlySpendingProvider`, etc.) from it. Writes always go through `ledger.save` / `delete` — never reach into a repository directly from the UI.
+
+**Reactivity:** `QueryResult` is mutated in place, so `==` won't catch view updates. The engine emits two pure-Dart `Stream<void>`s: `LedgerService.changes` fires after every successful `save` / `delete` / `sync` / `resolveConflicts` (broad signal for the read-side providers above), and `LedgerView.changes` fires after each `applySave` / `seed` / `restore` (targeted signal for a single view's tree). Providers `yield` the current snapshot, then re-`yield` on each event. Both streams are broadcast; closing the service or view closes them.
 
 Pre-computed views (`LedgerView`, Phase 1.8) are the right abstraction for any report or dashboard card that re-renders frequently. Register one with `ledger.register(name:, filter:, groupBy:, template:)` and read its current tree via `ledger.viewResult(name).result` (which throws if no such view is registered). A `LedgerView` *is* a named `(filter, groupBy, stats template)` plus the `QueryResult` it keeps fresh: it forwards each save to `QueryResult.remove`/`add` (the same fold `query` uses), so there's no rebuild or roll-up. Each card maps to one named view; the provider listens for view updates and rebuilds on change.
 

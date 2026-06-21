@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:collection/collection.dart';
 import 'package:decimal/decimal.dart';
 
@@ -52,6 +54,14 @@ class LedgerService {
 
   /// Ready, or blocked on unresolved sync conflicts. See [state].
   LedgerState _state = const LedgerReady();
+
+  /// Fires after every successful write ([save]/[delete]), [sync], and
+  /// [resolveConflicts] — used by reactivity layers (e.g. Riverpod providers)
+  /// to re-read the four repositories' state. Per-view updates also fire on
+  /// the corresponding [LedgerView.changes] stream.
+  final StreamController<void> _changesController =
+      StreamController<void>.broadcast();
+  Stream<void> get changes => _changesController.stream;
 
   LedgerService._({
     required String accountsPath,
@@ -194,6 +204,7 @@ class LedgerService {
       if (!result.isValid) return result;
     }
     await _write(entity);
+    _changesController.add(null);
     return ValidationResult.ok();
   }
 
@@ -215,6 +226,7 @@ class LedgerService {
       default:
         throw StateError('Unsupported entity type: ${entity.runtimeType}');
     }
+    _changesController.add(null);
   }
 
   /// Appends [entity] to its repository and, for transactions, updates and
@@ -285,6 +297,7 @@ class LedgerService {
     }
     await _persistViews();
     _state = conflicts.isEmpty ? const LedgerReady() : LedgerConflicted(conflicts);
+    _changesController.add(null);
   }
 
   /// Resolves the conflicts surfaced by a prior [sync]. [resolution] must cover
@@ -308,6 +321,15 @@ class LedgerService {
       }
     }
     _state = const LedgerReady();
+    _changesController.add(null);
+  }
+
+  /// Closes the [changes] stream and each registered view's stream.
+  Future<void> dispose() async {
+    for (final view in _viewsByName.values) {
+      await view.dispose();
+    }
+    await _changesController.close();
   }
 
   /// Brings [view] current by replaying the transaction appends after [from]

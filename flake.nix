@@ -23,11 +23,23 @@
 
         androidSdk = android-nixpkgs.sdk.${system} (sdkPkgs: with sdkPkgs; [
           cmdline-tools-latest
+          # 36 for the app (pinned in app/build.gradle.kts); 35 for Flutter
+          # plugin subprojects (file_picker etc.) that default to AGP 8.11's
+          # build-tools 35.0.0 and don't expose an override.
           build-tools-36-0-0
+          build-tools-35-0-0
           platform-tools
           platforms-android-36
+          platforms-android-35
+          # CMake the Flutter Gradle plugin's JNI build expects; the system
+          # cmake from linuxBuildDeps isn't picked up here because AGP
+          # specifically asks for the SDK-managed version.
+          cmake-3-22-1
           emulator
           system-images-android-34-google-apis-x86-64
+          # Pre-install the NDK pinned in app/build.gradle.kts. AGP can't
+          # auto-install into the read-only /nix/store SDK dir.
+          ndk-28-2-13676358
         ]);
 
         # The host's nix post-build hook normally chmods ELF binaries that
@@ -55,6 +67,10 @@
           xorg.libX11
           libGL
           sysprof
+          # glib's .pc declares `Requires.private: sysprof-capture-4`, whose .pc
+          # lives in this separate package (not in `sysprof` itself). Without
+          # it, pkg-config warns every time it processes glib.
+          libsysprof-capture
         ];
 
         # Runtime deps needed by the built Flutter Linux app

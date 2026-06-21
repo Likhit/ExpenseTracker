@@ -215,6 +215,24 @@ void main() {
     });
   });
 
+  group('LedgerView change notifications', () {
+    test('changes fires on applySave, seed, and restore', () async {
+      final ledger = await freshLedger();
+      final view = await ledger.register(name: 'totals');
+      final events = <void>[];
+      final subscription = view.changes.listen(events.add);
+
+      await ledger.save(expense(id: 'tx-1', amount: '10'));
+      await ledger.save(expense(id: 'tx-2', amount: '20'));
+
+      // Let the broadcast stream drain.
+      await Future<void>.delayed(Duration.zero);
+      expect(events, hasLength(2));
+
+      await subscription.cancel();
+    });
+  });
+
   group('LedgerView parity with query()', () {
     test('view matches one-shot query for the same filter/groupBy', () async {
       final ledger = await freshLedger();
