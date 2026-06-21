@@ -1,6 +1,7 @@
 import 'package:uuid/uuid.dart';
 
 import '../../models/line_id.dart';
+import '../storage/file_sync.dart';
 import '../storage/jsonl_storable.dart';
 import '../storage/jsonl_store.dart';
 
@@ -102,6 +103,35 @@ class Repository<Id, T extends JsonlStorable<Id>>
   /// The current tip `lineId` of this file (or [LineId.first] when empty).
   /// Used as the watermark when persisting maintained views.
   Future<LineId> currentTip() => _ensureTip();
+
+  /// Raw append chain, newest-first, with no dedup — every version of every
+  /// entity. Used by view catch-up, which replays appends one at a time.
+  Stream<T> appendsReversed() => store.readReverse();
+
+  /// Folds every conflict copy of this file into one linear chain (a rebase),
+  /// rewrites the file with the result, and deletes the copies. Returns the
+  /// entities edited on both sides (see [EntityConflict]); empty when there
+  /// were no copies or no divergent edits. Multiple copies are merged
+  /// pairwise in filename order.
+  Future<List<EntityConflict<Id, T>>> merge() async {
+    final copies = await store.conflictCopies();
+    if (copies.isEmpty) return const [];
+
+    var ours = await store.readForward();
+    final conflicts = <EntityConflict<Id, T>>[];
+    for (final copy in copies) {
+      final result = mergeChains<Id, T>(ours, copy.chain);
+      ours = result.merged;
+      conflicts.addAll(result.conflicts);
+    }
+
+    await store.writeAll(ours);
+    for (final copy in copies) {
+      await store.deleteFile(copy.file);
+    }
+    _tip = ours.isEmpty ? const LineId.first() : ours.last.lineId;
+    return conflicts;
+  }
 
   Future<T> save(T entity) async {
     final prev = await _ensureTip();

@@ -143,7 +143,8 @@ void main() {
   });
 
   group('staleness', () {
-    test('recomputes when the journal moved past the watermark', () async {
+    test('catches up incrementally when the journal moved past the watermark',
+        () async {
       final store = ViewStore(db);
       final a = await ledger(store: store);
       await a.register(name: 'totals');
@@ -154,12 +155,15 @@ void main() {
       final bypass = await ledger();
       await bypass.save(expense(id: 'tx-2', amount: '20'));
 
-      // Reopen with the now-stale store: watermark != tip → full recompute.
+      // Reopen with the now-stale store: restore tx-1 from the snapshot, then
+      // replay only tx-2 (the appends after the watermark) — not a rebuild.
       final c = await ledger(store: store);
       final view = await c.register(name: 'totals');
-      expect(view.result.stats.count, 4); // both txs folded in
-      expect(view.result.transactions, hasLength(2)); // re-seeded, hydrated
-      expect((view.result as LeafResult).source.checkpoint, isNull);
+      expect(view.result.stats.count, 4); // tx-1 (restored) + tx-2 (replayed)
+      // Only the replayed tx is materialized; tx-1 stays behind the checkpoint.
+      expect(view.result.transactions.map((t) => t.id),
+          {const TransactionId('tx-2')});
+      expect((view.result as LeafResult).source.checkpoint, isNotNull);
     });
   });
 
