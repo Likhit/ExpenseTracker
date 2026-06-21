@@ -30,6 +30,7 @@
           build-tools-35-0-0
           platform-tools
           platforms-android-36
+          platforms-android-35
           emulator
           system-images-android-34-google-apis-x86-64
           # Pre-install the NDK pinned in app/build.gradle.kts. AGP can't
