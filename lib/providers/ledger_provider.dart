@@ -8,6 +8,7 @@ import '../models/currency.dart';
 import '../models/transaction.dart';
 import '../services/ledger_service.dart';
 import '../services/ledger_state.dart';
+import '../services/seed_currencies.dart';
 
 part 'ledger_provider.g.dart';
 
@@ -27,6 +28,9 @@ Future<LedgerService> ledger(Ref ref) async {
     currenciesPath: '$appDir/currencies.jsonl',
     transactionsPath: '$appDir/transactions.jsonl',
   );
+  // Seed common fiats + crypto on a truly empty ledger — see
+  // `seedDefaultCurrenciesIfEmpty` for the no-op-on-existing-state contract.
+  await seedDefaultCurrenciesIfEmpty(service);
   ref.onDispose(service.dispose);
   return service;
 }

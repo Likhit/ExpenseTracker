@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'categories_screen.dart';
+import 'currencies_screen.dart';
 
 /// Settings hub. The UX spec lists more entries (sync folder, default
 /// currency, theme, …) — Phase 2.7 fills them in. For now this is just the
@@ -21,6 +22,14 @@ class SettingsScreen extends StatelessWidget {
             subtitle: const Text('Edit the expense and income hierarchies'),
             onTap: () => Navigator.of(context).push(
               MaterialPageRoute(builder: (_) => const CategoriesScreen()),
+            ),
+          ),
+          ListTile(
+            leading: const Icon(Icons.currency_exchange_outlined),
+            title: const Text('Currencies'),
+            subtitle: const Text('Fiat, stocks, and crypto'),
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const CurrenciesScreen()),
             ),
           ),
         ],
