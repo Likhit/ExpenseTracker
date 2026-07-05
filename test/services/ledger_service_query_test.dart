@@ -413,6 +413,46 @@ void main() {
       expect(keys, {DateTime.utc(2026, 4, 1), DateTime.utc(2026, 5, 1)});
     });
 
+    test('group by transaction type', () async {
+      final result = await ledger.query(
+        const LedgerFilter(),
+        groupBy: const [GroupDimension.byTransactionType()],
+      );
+      final byType = {
+        for (final c in result.children)
+          (c.key as TransactionTypeKey).type: c,
+      };
+      // Active txs: tx-1 (expense), tx-2 (income), tx-3 (transfer), tx-4
+      // (expense). tx-5 is soft-deleted and excluded by default.
+      expect(byType.keys, {
+        TransactionType.expense,
+        TransactionType.income,
+        TransactionType.transfer,
+      });
+      expect(byType[TransactionType.expense]!.transactions.map((t) => t.id),
+          {const TransactionId('tx-1'), const TransactionId('tx-4')});
+      expect(byType[TransactionType.transfer]!.stats.sumByCurrency, {
+        const CurrencyCode('USD'): d('-2000'),
+        const CurrencyCode('AAPL'): d('10'),
+      });
+    });
+
+    test('compose: group by time (month) then transaction type', () async {
+      final result = await ledger.query(
+        const LedgerFilter(),
+        groupBy: const [
+          GroupDimension.byTime(TimeBucket.month),
+          GroupDimension.byTransactionType(),
+        ],
+      );
+      // May 2026 holds tx-3 (transfer) and tx-4 (expense).
+      final may = result.children.firstWhere(
+          (c) => (c.key as TimeKey).bucketStart == DateTime.utc(2026, 5, 1));
+      final mayTypes =
+          may.children.map((c) => (c.key as TransactionTypeKey).type).toSet();
+      expect(mayTypes, {TransactionType.transfer, TransactionType.expense});
+    });
+
     test('intermediate node derives stats and transactions from children',
         () async {
       final result = await ledger.query(

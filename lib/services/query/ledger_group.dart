@@ -31,18 +31,24 @@ sealed class GroupDimension with _$GroupDimension {
 
   const factory GroupDimension.byTime(TimeBucket bucket) = ByTime;
 
+  /// Groups by the transaction's [TransactionType] (expense / income /
+  /// transfer). Transaction-level, so every leg of a transaction routes to
+  /// the same bucket — used for income-vs-expense-over-time reports.
+  const factory GroupDimension.byTransactionType() = ByTransactionType;
+
   factory GroupDimension.fromJson(Map<String, dynamic> json) =>
       _$GroupDimensionFromJson(json);
 
   /// Resolves the group key for [leg] under this dimension. [tx] is
-  /// passed for transaction-level fields (currently only [ByTime] uses
-  /// it via `tx.date`).
+  /// passed for transaction-level fields ([ByTime] via `tx.date`,
+  /// [ByTransactionType] via `tx.type`).
   GroupKey keyFor(Leg leg, Transaction tx) {
     return switch (this) {
       ByAccount() => GroupKey.account(leg.accountId),
       ByCategory(:final depth) => _categoryKey(leg.categoryPath, depth),
       ByCurrency() => GroupKey.currency(leg.currencyCode),
       ByTime(:final bucket) => GroupKey.time(_bucketStart(tx.date, bucket)),
+      ByTransactionType() => GroupKey.transactionType(tx.type),
     };
   }
 
@@ -80,6 +86,8 @@ sealed class GroupKey with _$GroupKey {
   const factory GroupKey.currency(@CurrencyCodeConverter() CurrencyCode code) =
       CurrencyKey;
   const factory GroupKey.time(DateTime bucketStart) = TimeKey;
+  const factory GroupKey.transactionType(TransactionType type) =
+      TransactionTypeKey;
   const factory GroupKey.none() = NoneKey;
 
   factory GroupKey.fromJson(Map<String, dynamic> json) =>
