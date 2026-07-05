@@ -1,5 +1,6 @@
 import 'package:decimal/decimal.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:uuid/uuid.dart';
 
@@ -8,6 +9,7 @@ import '../../models/ids.dart';
 import '../../models/leg.dart';
 import '../../models/transaction.dart';
 import '../../providers/ledger_provider.dart';
+import '../../providers/settings_provider.dart';
 import '../widgets/account_picker.dart';
 import '../widgets/currency_input.dart';
 import '../widgets/date_chips.dart';
@@ -210,12 +212,30 @@ class _TransferEntryScreenState extends ConsumerState<TransferEntryScreen> {
     if (accountsAsync.hasValue) _prefillAccounts(accountsAsync.value!);
     final active = currencies.where((c) => !c.deleted).toList();
     if (_currencyFrom == null && active.isNotEmpty) {
-      _currencyFrom = active.first.code;
+      final defaultCode = ref.watch(settingsProvider).value?.defaultCurrencyCode;
+      CurrencyCode? preferred;
+      for (final c in active) {
+        if (c.code.value == defaultCode) {
+          preferred = c.code;
+          break;
+        }
+      }
+      _currencyFrom = preferred ?? active.first.code;
     }
     // Default the destination currency to match source until the user changes it.
     _currencyTo ??= _currencyFrom;
 
-    return Scaffold(
+    return CallbackShortcuts(
+      bindings: {
+        const SingleActivator(LogicalKeyboardKey.keyS, control: true): () {
+          if (!_saving) _save();
+        },
+        const SingleActivator(LogicalKeyboardKey.escape): () =>
+            Navigator.of(context).maybePop(),
+      },
+      child: Focus(
+        autofocus: true,
+        child: Scaffold(
       appBar: AppBar(
         title: Text(widget.existing != null ? 'Edit transfer' : 'New transfer'),
         actions: [
@@ -317,6 +337,8 @@ class _TransferEntryScreenState extends ConsumerState<TransferEntryScreen> {
               Text(_saveError!, style: TextStyle(color: theme.colorScheme.error)),
             ],
           ],
+        ),
+      ),
         ),
       ),
     );

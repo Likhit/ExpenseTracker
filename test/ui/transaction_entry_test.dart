@@ -1,5 +1,6 @@
 import 'package:decimal/decimal.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:expense_tracker/models/account.dart';
@@ -237,6 +238,43 @@ void main() {
       // Sanity: no transaction saved yet (we only picked a category).
       final saved = await readTxs(tester, ledger);
       expect(saved, isEmpty);
+    });
+  });
+
+  group('Keyboard shortcuts', () {
+    testWidgets('Ctrl+S saves the expense', (tester) async {
+      final ledger = await pumpWithLedger(
+        tester,
+        const ExpenseIncomeEntryScreen(type: TransactionType.expense),
+        seed: (l) async {
+          await l.save(usd());
+          await l.save(foodCat());
+          await l.save(asset('chase', 'Chase::Checking'));
+        },
+      );
+
+      await tester.enterText(
+          find.widgetWithText(TextFormField, 'Amount'), '9.99');
+      await tester.tap(find.text('Tap to pick').first);
+      await drain(tester);
+      await tester.tap(find.text('Food'));
+      await drain(tester);
+      await tester.tap(find.text('Tap to pick'));
+      await drain(tester);
+      await tester.tap(find.text('Checking'));
+      await drain(tester);
+
+      // Trigger the save via Ctrl+S instead of tapping the button.
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+      await tester.sendKeyEvent(LogicalKeyboardKey.keyS);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+      await drain(tester);
+
+      final saved = await readTxs(tester, ledger);
+      expect(saved, hasLength(1));
+      final assetLeg = saved.single.legs
+          .firstWhere((l) => l.accountId.value == 'chase');
+      expect(assetLeg.amount.toString(), '-9.99');
     });
   });
 

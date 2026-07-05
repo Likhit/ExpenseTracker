@@ -9,19 +9,32 @@ import '../models/transaction.dart';
 import '../services/ledger_service.dart';
 import '../services/ledger_state.dart';
 import '../services/seed_currencies.dart';
+import 'settings_provider.dart';
 
 part 'ledger_provider.g.dart';
 
 /// The single [LedgerService] for the app. Async because `create()` opens
 /// JSONL files and runs the startup sync; `keepAlive` because it's the root
 /// service that the UI keeps watching for its entire lifetime.
+///
+/// The JSONL files live in the user's chosen sync folder when set, else under
+/// an app-named subdirectory of the documents dir. We watch *only* the sync
+/// folder via [Settings.selectAsync] so unrelated settings changes (theme,
+/// default currency) don't rebuild the whole ledger — only repointing the sync
+/// folder does.
 @Riverpod(keepAlive: true)
 Future<LedgerService> ledger(Ref ref) async {
-  // Scope our JSONL files under an app-named subdirectory so we don't litter
-  // the user's documents root (and so they're easy to find for backup or the
-  // future sync-folder picker). JsonlStore creates parents on first write.
-  final dir = await getApplicationDocumentsDirectory();
-  final appDir = '${dir.path}/$appName';
+  final syncFolder =
+      await ref.watch(settingsProvider.selectAsync((s) => s.syncFolder));
+  final String appDir;
+  if (syncFolder != null) {
+    appDir = syncFolder;
+  } else {
+    // Scope our JSONL files under an app-named subdirectory so we don't litter
+    // the user's documents root. JsonlStore creates parents on first write.
+    final dir = await getApplicationDocumentsDirectory();
+    appDir = '${dir.path}/$appName';
+  }
   final service = await LedgerService.create(
     accountsPath: '$appDir/accounts.jsonl',
     categoriesPath: '$appDir/categories.jsonl',

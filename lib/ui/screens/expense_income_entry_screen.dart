@@ -1,5 +1,6 @@
 import 'package:decimal/decimal.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:uuid/uuid.dart';
 
@@ -9,6 +10,7 @@ import '../../models/ids.dart';
 import '../../models/leg.dart';
 import '../../models/transaction.dart';
 import '../../providers/ledger_provider.dart';
+import '../../providers/settings_provider.dart';
 import '../widgets/account_picker.dart';
 import '../widgets/category_picker.dart';
 import '../widgets/category_visuals.dart';
@@ -229,10 +231,22 @@ class _ExpenseIncomeEntryScreenState
     // read them) see fully-loaded data the first time they're opened.
     final accountsAsync = ref.watch(accountsProvider);
     final categoriesAsync = ref.watch(categoriesProvider);
-    // Default currency: first active fiat, else first of any.
+    // Default currency: the configured default when it's still active, else
+    // the first active currency.
     if (_currency == null && currencies.isNotEmpty) {
       final active = currencies.where((c) => !c.deleted).toList();
-      if (active.isNotEmpty) _currency = active.first.code;
+      if (active.isNotEmpty) {
+        final defaultCode =
+            ref.watch(settingsProvider).value?.defaultCurrencyCode;
+        CurrencyCode? preferred;
+        for (final c in active) {
+          if (c.code.value == defaultCode) {
+            preferred = c.code;
+            break;
+          }
+        }
+        _currency = preferred ?? active.first.code;
+      }
     }
     // One-shot prefill of the account/category tiles for edits, once both the
     // accounts and categories providers have resolved.
@@ -240,7 +254,17 @@ class _ExpenseIncomeEntryScreenState
       _prefillFromExisting(accountsAsync.value!, categoriesAsync.value!);
     }
 
-    return Scaffold(
+    return CallbackShortcuts(
+      bindings: {
+        const SingleActivator(LogicalKeyboardKey.keyS, control: true): () {
+          if (!_saving) _save();
+        },
+        const SingleActivator(LogicalKeyboardKey.escape): () =>
+            Navigator.of(context).maybePop(),
+      },
+      child: Focus(
+        autofocus: true,
+        child: Scaffold(
       appBar: AppBar(
         title: Text(_isEdit
             ? (_isExpense ? 'Edit expense' : 'Edit income')
@@ -302,6 +326,8 @@ class _ExpenseIncomeEntryScreenState
                   style: TextStyle(color: theme.colorScheme.error)),
             ],
           ],
+        ),
+      ),
         ),
       ),
     );

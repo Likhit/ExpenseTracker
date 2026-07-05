@@ -3,31 +3,50 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:sembast/sembast_memory.dart';
 
 import 'package:expense_tracker/providers/ledger_provider.dart';
+import 'package:expense_tracker/providers/settings_provider.dart';
+import 'package:expense_tracker/services/app_settings.dart';
 import 'package:expense_tracker/services/ledger_service.dart';
+import 'package:expense_tracker/services/settings_store.dart';
+
+/// A fresh in-memory [SettingsStore], optionally pre-seeded with [seed]. Must
+/// be called inside a [WidgetTester.runAsync] block (it opens a sembast DB).
+/// Tests that need to assert on persisted settings create one here, pass it to
+/// [pumpWithLedger], and read it back afterwards.
+Future<SettingsStore> memorySettingsStore([AppSettings? seed]) async {
+  final db = await newDatabaseFactoryMemory().openDatabase('settings.db');
+  final store = SettingsStore(db);
+  if (seed != null) await store.save(seed);
+  return store;
+}
 
 /// Pumps [child] under a [ProviderScope] whose [ledgerProvider] resolves to a
-/// freshly constructed [LedgerService] over a temp directory. The directory and
-/// the service are torn down automatically when the test ends.
+/// freshly constructed [LedgerService] over a temp directory, and whose
+/// [settingsStoreProvider] resolves to an in-memory [SettingsStore]. The
+/// directory and the service are torn down automatically when the test ends.
 ///
 /// Real disk I/O (creating the temp dir, opening the JSONL files, seeding) is
 /// wrapped in [WidgetTester.runAsync] — widget tests run under a fake clock by
 /// default, so plain `await` on real I/O would deadlock.
 ///
-/// Returns the live [LedgerService] so tests can seed it directly (skipping the
-/// UI) before exercising widgets.
+/// Pass [settingsStore] (built via [memorySettingsStore]) to control/inspect
+/// persisted settings; otherwise a fresh empty one is used. Returns the live
+/// [LedgerService] so tests can seed it directly before exercising widgets.
 Future<LedgerService> pumpWithLedger(
   WidgetTester tester,
   Widget child, {
   Size size = const Size(800, 1200),
   Future<void> Function(LedgerService ledger)? seed,
+  SettingsStore? settingsStore,
 }) async {
   await tester.binding.setSurfaceSize(size);
   addTearDown(() => tester.binding.setSurfaceSize(null));
 
   late final Directory dir;
   late final LedgerService ledger;
+  late final SettingsStore settings;
   await tester.runAsync(() async {
     dir = await Directory.systemTemp.createTemp('expense_tracker_ui_');
     ledger = await LedgerService.create(
@@ -37,6 +56,7 @@ Future<LedgerService> pumpWithLedger(
       transactionsPath: '${dir.path}/transactions.jsonl',
     );
     if (seed != null) await seed(ledger);
+    settings = settingsStore ?? await memorySettingsStore();
   });
   addTearDown(() async {
     await ledger.dispose();
@@ -47,6 +67,7 @@ Future<LedgerService> pumpWithLedger(
     ProviderScope(
       overrides: [
         ledgerProvider.overrideWith((ref) async => ledger),
+        settingsStoreProvider.overrideWith((ref) async => settings),
       ],
       child: MaterialApp(home: child),
     ),
