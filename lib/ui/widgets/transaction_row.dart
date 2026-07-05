@@ -35,6 +35,7 @@ class TransactionRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final isTransfer = transaction.type == TransactionType.transfer;
     final assetLeg = _assetLeg();
     final account = assetLeg == null ? null : accountsById[assetLeg.accountId];
     final currency = assetLeg == null
@@ -52,6 +53,26 @@ class TransactionRow extends StatelessWidget {
           )
         : theme.textTheme.bodyLarge;
 
+    // Transfers span two user accounts, so show both sides ("From → To").
+    // Expense/income only touch one asset account, so show just that path.
+    final String? subtitleText;
+    if (isTransfer) {
+      final from = _transferLeg(negative: true);
+      final to = _transferLeg(negative: false);
+      final fromName = from == null ? '?' : accountsById[from.accountId]?.path;
+      final toName = to == null ? '?' : accountsById[to.accountId]?.path;
+      subtitleText = '${fromName ?? '?'} → ${toName ?? '?'}';
+    } else {
+      subtitleText = account?.path;
+    }
+
+    // Transfers are neither income nor expense — money just moves between the
+    // user's own accounts — so render them unsigned and in a muted color.
+    final amountText = assetLeg == null
+        ? null
+        : formatMoney(
+            isTransfer ? assetLeg.amount.abs() : assetLeg.amount, currency);
+
     return ListTile(
       leading: CircleAvatar(
         backgroundColor: _typeColor(transaction.type, theme)
@@ -60,21 +81,21 @@ class TransactionRow extends StatelessWidget {
         child: Icon(_typeIcon(transaction.type)),
       ),
       title: Text(titleText, style: titleStyle, overflow: TextOverflow.ellipsis),
-      subtitle: account == null ? null : Text(account.path),
+      subtitle: subtitleText == null ? null : Text(subtitleText),
       trailing: SizedBox(
         width: 140,
         child: Row(
           mainAxisAlignment: MainAxisAlignment.end,
           children: [
             Flexible(
-              child: assetLeg == null
+              child: amountText == null
                   ? const SizedBox.shrink()
                   : Text(
-                      formatMoney(assetLeg.amount, currency),
+                      amountText,
                       textAlign: TextAlign.right,
                       style: theme.textTheme.titleMedium?.copyWith(
                         color: _amountColor(transaction.type,
-                            assetLeg.amount, theme),
+                            assetLeg!.amount, theme),
                       ),
                     ),
             ),
@@ -129,14 +150,23 @@ class TransactionRow extends StatelessWidget {
   Leg? _assetLeg() {
     if (transaction.legs.isEmpty) return null;
     if (transaction.type == TransactionType.transfer) {
-      return transaction.legs.firstWhere(
-          (l) => l.amount < Decimal.zero,
-          orElse: () => transaction.legs.first);
+      return _transferLeg(negative: true) ?? transaction.legs.first;
     }
     return transaction.legs.firstWhere(
       (l) => l.accountId != Account.expenseId && l.accountId != Account.incomeId,
       orElse: () => transaction.legs.first,
     );
+  }
+
+  /// The outflow (`negative: true`) or inflow leg of a transfer, or null if the
+  /// transaction has no leg of that sign.
+  Leg? _transferLeg({required bool negative}) {
+    for (final l in transaction.legs) {
+      if (negative ? l.amount < Decimal.zero : l.amount > Decimal.zero) {
+        return l;
+      }
+    }
+    return null;
   }
 }
 
@@ -156,7 +186,7 @@ Color _amountColor(TransactionType t, Decimal amount, ThemeData theme) =>
     switch (t) {
       TransactionType.expense => Colors.red.shade700,
       TransactionType.income => Colors.green.shade700,
-      TransactionType.transfer => theme.colorScheme.onSurface,
+      TransactionType.transfer => theme.colorScheme.onSurfaceVariant,
     };
 
 String _typeLabel(TransactionType t) => switch (t) {

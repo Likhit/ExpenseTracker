@@ -1,3 +1,4 @@
+import 'package:decimal/decimal.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -5,6 +6,7 @@ import 'package:expense_tracker/models/account.dart';
 import 'package:expense_tracker/models/category.dart';
 import 'package:expense_tracker/models/currency.dart';
 import 'package:expense_tracker/models/ids.dart';
+import 'package:expense_tracker/models/leg.dart';
 import 'package:expense_tracker/models/transaction.dart';
 import 'package:expense_tracker/services/ledger_service.dart';
 import 'package:expense_tracker/ui/screens/expense_income_entry_screen.dart';
@@ -133,6 +135,106 @@ void main() {
       await drain(tester);
 
       expect(find.text('Enter an amount'), findsOneWidget);
+      final saved = await readTxs(tester, ledger);
+      expect(saved, isEmpty);
+    });
+  });
+
+  group('Expense edit', () {
+    Transaction existingExpense() => Transaction(
+          id: const TransactionId('tx-edit'),
+          date: now,
+          description: 'Lunch',
+          type: TransactionType.expense,
+          legs: [
+            Leg(
+              accountId: const AccountId('chase'),
+              amount: Decimal.parse('-12.50'),
+              currencyCode: const CurrencyCode('USD'),
+              categoryPath: const CategoryPath('Food'),
+            ),
+            Leg(
+              accountId: Account.expenseId,
+              amount: Decimal.parse('12.50'),
+              currencyCode: const CurrencyCode('USD'),
+            ),
+          ],
+          createdAt: now,
+        );
+
+    testWidgets('titles the screen "Edit expense" and prefills category/account',
+        (tester) async {
+      await pumpWithLedger(
+        tester,
+        ExpenseIncomeEntryScreen(
+            type: TransactionType.expense, existing: existingExpense()),
+        seed: (l) async {
+          await l.save(usd());
+          await l.save(foodCat());
+          await l.save(asset('chase', 'Chase::Checking'));
+        },
+      );
+
+      // Edit-mode title, not "New expense".
+      expect(find.text('Edit expense'), findsOneWidget);
+      expect(find.text('New expense'), findsNothing);
+      // Category and account tiles are prefilled from the existing legs.
+      expect(find.text('Food'), findsOneWidget);
+      expect(find.text('Chase::Checking'), findsOneWidget);
+      // No "Tap to pick" placeholders remain for those tiles.
+      expect(find.text('Tap to pick'), findsNothing);
+    });
+  });
+
+  group('Category picker hierarchy', () {
+    testWidgets('drills from a root into its descendants, then picks a leaf',
+        (tester) async {
+      final ledger = await pumpWithLedger(
+        tester,
+        const ExpenseIncomeEntryScreen(type: TransactionType.expense),
+        seed: (l) async {
+          await l.save(usd());
+          await l.save(asset('chase', 'Chase::Checking'));
+          await l.save(Category(
+            id: const CategoryId('food'),
+            path: const CategoryPath('Food'),
+            parentType: TransactionType.expense,
+            createdAt: now,
+          ));
+          await l.save(Category(
+            id: const CategoryId('groceries'),
+            path: const CategoryPath('Food::Groceries'),
+            parentType: TransactionType.expense,
+            createdAt: now,
+          ));
+          await l.save(Category(
+            id: const CategoryId('snacks'),
+            path: const CategoryPath('Food::Snacks'),
+            parentType: TransactionType.expense,
+            createdAt: now,
+          ));
+        },
+      );
+
+      await tester.tap(find.text('Tap to pick').first);
+      await drain(tester);
+
+      // Root grid/list shows Food but not its children yet.
+      expect(find.text('Food'), findsOneWidget);
+      expect(find.text('Groceries'), findsNothing);
+
+      // Tapping the root (which has descendants) drills in.
+      await tester.tap(find.text('Food'));
+      await drain(tester);
+      expect(find.text('Groceries'), findsOneWidget);
+      expect(find.text('Snacks'), findsOneWidget);
+
+      // Tapping a leaf selects it and closes the picker.
+      await tester.tap(find.text('Groceries'));
+      await drain(tester);
+      expect(find.text('Food::Groceries'), findsOneWidget);
+
+      // Sanity: no transaction saved yet (we only picked a category).
       final saved = await readTxs(tester, ledger);
       expect(saved, isEmpty);
     });

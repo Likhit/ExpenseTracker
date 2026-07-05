@@ -96,6 +96,34 @@ void main() {
         createdAt: now,
       );
 
+  Transaction transfer({
+    required String id,
+    required String amount,
+    String from = 'chase',
+    String to = 'cash',
+    DateTime? date,
+    String description = '',
+  }) =>
+      Transaction(
+        id: TransactionId(id),
+        date: date ?? now,
+        description: description,
+        type: TransactionType.transfer,
+        legs: [
+          Leg(
+            accountId: AccountId(from),
+            amount: -d(amount),
+            currencyCode: const CurrencyCode('USD'),
+          ),
+          Leg(
+            accountId: AccountId(to),
+            amount: d(amount),
+            currencyCode: const CurrencyCode('USD'),
+          ),
+        ],
+        createdAt: now,
+      );
+
   group('TransactionsScreen list', () {
     testWidgets('empty state when no transactions yet', (tester) async {
       await pumpWithLedger(tester, const TransactionsScreen());
@@ -195,6 +223,27 @@ void main() {
 
       expect(find.text('On Chase'), findsOneWidget);
       expect(find.text('On Cash'), findsNothing);
+    });
+
+    testWidgets('transfer row shows both accounts and an unsigned amount',
+        (tester) async {
+      await pumpWithLedger(
+        tester,
+        const TransactionsScreen(),
+        seed: (l) async {
+          await l.save(usd());
+          await l.save(chase());
+          await l.save(cash());
+          await l.save(transfer(id: 't', amount: '75'));
+        },
+      );
+
+      // Both sides of the transfer are shown as "From → To".
+      expect(find.text('Chase::Checking → Cash'), findsOneWidget);
+      // The amount is unsigned (no leading minus) — transfers aren't a gain or
+      // a loss, just a move between the user's own accounts.
+      expect(find.text(r'$75.00'), findsOneWidget);
+      expect(find.textContaining('-'), findsNothing);
     });
 
     testWidgets('soft-delete hides the row and Show-deleted reveals it',

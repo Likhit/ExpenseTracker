@@ -55,8 +55,12 @@ class _ExpenseIncomeEntryScreenState
   late DateTime _date;
   String? _saveError;
   bool _saving = false;
+  // Set once the account/category objects behind an edit's asset leg have been
+  // resolved from the (async) providers. Guards the one-shot prefill in build.
+  bool _prefilled = false;
 
   bool get _isExpense => widget.type == TransactionType.expense;
+  bool get _isEdit => widget.existing != null;
 
   @override
   void initState() {
@@ -65,7 +69,8 @@ class _ExpenseIncomeEntryScreenState
     _date = existing?.date ?? DateTime.now();
     _description = TextEditingController(text: existing?.description ?? '');
     // For edits, pull the prefill from the asset-side leg (the one not on the
-    // built-in sink/source).
+    // built-in sink/source). The account/category *objects* need the providers
+    // loaded, so they're resolved lazily in build (see `_prefillFromExisting`).
     if (existing != null) {
       final assetLeg = existing.legs.firstWhere((l) =>
           l.accountId != Account.expenseId && l.accountId != Account.incomeId);
@@ -186,23 +191,60 @@ class _ExpenseIncomeEntryScreenState
     Navigator.of(context).pop(tx);
   }
 
+  /// Resolve an edit's account/category *objects* from the loaded providers and
+  /// fill the pickers. Runs once, when both providers have a value.
+  void _prefillFromExisting(
+      List<Account> accounts, List<Category> categories) {
+    final existing = widget.existing;
+    if (existing == null || _prefilled) return;
+    _prefilled = true;
+    final assetLeg = existing.legs.firstWhere((l) =>
+        l.accountId != Account.expenseId && l.accountId != Account.incomeId);
+    _account = accounts
+        .where((a) => a.id == assetLeg.accountId)
+        .cast<Account?>()
+        .firstWhere((_) => true, orElse: () => null);
+    final path = assetLeg.categoryPath;
+    if (path != null) {
+      _category = categories
+              .where((c) => c.path.value == path.value && !c.deleted)
+              .cast<Category?>()
+              .firstWhere((_) => true, orElse: () => null) ??
+          // The category was deleted since; keep a display-only stand-in so the
+          // tile shows the original path and Save preserves it.
+          Category(
+            id: CategoryId(_uuid.v4()),
+            path: path,
+            parentType: widget.type,
+            createdAt: existing.createdAt,
+          );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final currencies = ref.watch(currenciesProvider).value ?? const [];
     // Prime the accounts/categories providers up front so the pickers (which
     // read them) see fully-loaded data the first time they're opened.
-    ref.watch(accountsProvider);
-    ref.watch(categoriesProvider);
+    final accountsAsync = ref.watch(accountsProvider);
+    final categoriesAsync = ref.watch(categoriesProvider);
     // Default currency: first active fiat, else first of any.
     if (_currency == null && currencies.isNotEmpty) {
       final active = currencies.where((c) => !c.deleted).toList();
       if (active.isNotEmpty) _currency = active.first.code;
     }
+    // One-shot prefill of the account/category tiles for edits, once both the
+    // accounts and categories providers have resolved.
+    if (accountsAsync.hasValue && categoriesAsync.hasValue) {
+      _prefillFromExisting(accountsAsync.value!, categoriesAsync.value!);
+    }
 
     return Scaffold(
       appBar: AppBar(
-        title: Text(_isExpense ? 'New expense' : 'New income'),
+        title: Text(_isEdit
+            ? (_isExpense ? 'Edit expense' : 'Edit income')
+            : (_isExpense ? 'New expense' : 'New income')),
         actions: [
           TextButton.icon(
             onPressed: _saving ? null : _save,

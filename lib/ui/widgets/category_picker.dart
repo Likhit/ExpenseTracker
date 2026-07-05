@@ -44,6 +44,9 @@ class _CategoryPickerSheet extends ConsumerStatefulWidget {
 class _CategoryPickerSheetState extends ConsumerState<_CategoryPickerSheet> {
   final _searchCtl = TextEditingController();
   String _query = '';
+  // Segments drilled into so far ([] at the root level). The browser shows the
+  // categories one level below this prefix.
+  List<String> _stack = const [];
 
   @override
   void dispose() {
@@ -104,9 +107,16 @@ class _CategoryPickerSheetState extends ConsumerState<_CategoryPickerSheet> {
           ),
           Expanded(
             child: query.isEmpty
-                ? _RootGrid(
-                    roots: roots,
+                ? _HierarchyBrowser(
+                    pool: pool,
+                    rootByName: rootByName,
+                    stack: _stack,
+                    onDrill: (seg) =>
+                        setState(() => _stack = [..._stack, seg]),
+                    onUp: () => setState(
+                        () => _stack = _stack.sublist(0, _stack.length - 1)),
                     onPick: (c) => Navigator.of(context).pop(c),
+                    theme: theme,
                   )
                 : _MatchList(
                     matches: matching,
@@ -162,16 +172,47 @@ class _CategoryPickerSheetState extends ConsumerState<_CategoryPickerSheet> {
   }
 }
 
-class _RootGrid extends StatelessWidget {
-  final List<Category> roots;
+/// Drill-down browser over the category hierarchy. At the root level it lists
+/// the root categories; tapping one that has descendants drills into its next
+/// level, and so on until a leaf. A row with descendants exposes a chevron to
+/// drill in and (when it is itself a real category) taps through to select it;
+/// a leaf row selects directly. A back row and a `Use <path>` row at the top
+/// let the user step up and pick a non-leaf category.
+class _HierarchyBrowser extends StatelessWidget {
+  final List<Category> pool;
+  final Map<String, Category> rootByName;
+  final List<String> stack;
+  final ValueChanged<String> onDrill;
+  final VoidCallback onUp;
   final ValueChanged<Category> onPick;
+  final ThemeData theme;
 
-  const _RootGrid({required this.roots, required this.onPick});
+  const _HierarchyBrowser({
+    required this.pool,
+    required this.rootByName,
+    required this.stack,
+    required this.onDrill,
+    required this.onUp,
+    required this.onPick,
+    required this.theme,
+  });
+
+  static bool _startsWith(List<String> full, List<String> prefix) {
+    if (full.length < prefix.length) return false;
+    for (var i = 0; i < prefix.length; i++) {
+      if (full[i] != prefix[i]) return false;
+    }
+    return true;
+  }
+
+  Category? _entityAt(String path) => pool
+      .where((c) => c.path.value == path)
+      .cast<Category?>()
+      .firstWhere((_) => true, orElse: () => null);
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    if (roots.isEmpty) {
+    if (pool.isEmpty) {
       return Center(
         child: Padding(
           padding: const EdgeInsets.all(24),
@@ -183,41 +224,71 @@ class _RootGrid extends StatelessWidget {
         ),
       );
     }
-    return GridView.builder(
-      padding: const EdgeInsets.symmetric(horizontal: 12),
-      gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-        maxCrossAxisExtent: 120,
-        mainAxisExtent: 96,
-      ),
-      itemCount: roots.length,
-      itemBuilder: (_, i) {
-        final root = roots[i];
-        final tint = parseCategoryColor(root.color) ??
-            theme.colorScheme.secondary;
-        return InkWell(
-          onTap: () => onPick(root),
-          borderRadius: BorderRadius.circular(12),
-          child: Padding(
-            padding: const EdgeInsets.all(8),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                CircleAvatar(
-                  backgroundColor: tint.withValues(alpha: 0.2),
-                  foregroundColor: tint,
-                  radius: 22,
-                  child: Icon(categoryIconFor(root.icon)),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  root.displayName,
-                  overflow: TextOverflow.ellipsis,
-                  style: theme.textTheme.bodyMedium,
-                ),
-              ],
-            ),
+
+    // The distinct next segments one level below the current prefix, sorted.
+    final segments = <String>{};
+    for (final c in pool) {
+      final parts = c.pathSegments;
+      if (parts.length > stack.length && _startsWith(parts, stack)) {
+        segments.add(parts[stack.length]);
+      }
+    }
+    final ordered = segments.toList()..sort();
+    final prefixPath = stack.join('::');
+    final currentEntity = stack.isEmpty ? null : _entityAt(prefixPath);
+
+    return ListView(
+      children: [
+        if (stack.isNotEmpty) ...[
+          ListTile(
+            leading: const Icon(Icons.arrow_back),
+            title: Text(prefixPath,
+                style: theme.textTheme.titleSmall
+                    ?.copyWith(color: theme.colorScheme.primary)),
+            onTap: onUp,
           ),
-        );
+          if (currentEntity != null)
+            ListTile(
+              leading: const Icon(Icons.check_circle_outline),
+              title: Text('Use "$prefixPath"'),
+              onTap: () => onPick(currentEntity),
+            ),
+          const Divider(height: 1),
+        ],
+        for (final seg in ordered)
+          _segmentRow(seg),
+      ],
+    );
+  }
+
+  Widget _segmentRow(String seg) {
+    final fullParts = [...stack, seg];
+    final fullPath = fullParts.join('::');
+    final entity = _entityAt(fullPath);
+    final hasChildren =
+        pool.any((c) => _startsWith(c.pathSegments, fullParts) &&
+            c.pathSegments.length > fullParts.length);
+    final rootName = fullParts.first;
+    final root = rootByName[rootName];
+    final tint =
+        parseCategoryColor(root?.color) ?? theme.colorScheme.secondary;
+
+    return ListTile(
+      leading: CircleAvatar(
+        backgroundColor: tint.withValues(alpha: 0.2),
+        foregroundColor: tint,
+        child: Icon(categoryIconFor(root?.icon)),
+      ),
+      title: Text(seg),
+      // A branch drills in; a leaf selects. Non-leaf real categories are still
+      // selectable via the "Use ..." row after drilling in.
+      trailing: hasChildren ? const Icon(Icons.chevron_right) : null,
+      onTap: () {
+        if (hasChildren) {
+          onDrill(seg);
+        } else if (entity != null) {
+          onPick(entity);
+        }
       },
     );
   }

@@ -41,6 +41,8 @@ class _TransferEntryScreenState extends ConsumerState<TransferEntryScreen> {
   late DateTime _date;
   String? _saveError;
   bool _saving = false;
+  // Guards the one-shot resolution of the from/to account objects for an edit.
+  bool _prefilled = false;
 
   bool get _crossCurrency =>
       _currencyFrom != null &&
@@ -62,6 +64,8 @@ class _TransferEntryScreenState extends ConsumerState<TransferEntryScreen> {
       _amountTo = to.amount;
       _currencyFrom = from.currencyCode;
       _currencyTo = to.currencyCode;
+      // The account *objects* are resolved lazily in build once the accounts
+      // provider has loaded (see `_prefillAccounts`).
     }
   }
 
@@ -91,6 +95,22 @@ class _TransferEntryScreenState extends ConsumerState<TransferEntryScreen> {
         title: 'To account');
     if (picked == null) return;
     setState(() => _to = picked);
+  }
+
+  /// Resolve the from/to account objects for an edit once the accounts provider
+  /// has loaded. Runs once.
+  void _prefillAccounts(List<Account> accounts) {
+    final existing = widget.existing;
+    if (existing == null || _prefilled || existing.legs.length != 2) return;
+    _prefilled = true;
+    Account? lookup(AccountId id) => accounts
+        .where((a) => a.id == id)
+        .cast<Account?>()
+        .firstWhere((_) => true, orElse: () => null);
+    final fromLeg = existing.legs.firstWhere((l) => l.amount < Decimal.zero);
+    final toLeg = existing.legs.firstWhere((l) => l.amount > Decimal.zero);
+    _from = lookup(fromLeg.accountId);
+    _to = lookup(toLeg.accountId);
   }
 
   Future<void> _save() async {
@@ -186,7 +206,8 @@ class _TransferEntryScreenState extends ConsumerState<TransferEntryScreen> {
     final currencies = ref.watch(currenciesProvider).value ?? const [];
     // Prime accounts up front so the From/To pickers (which read it lazily)
     // see fully-loaded data on first open.
-    ref.watch(accountsProvider);
+    final accountsAsync = ref.watch(accountsProvider);
+    if (accountsAsync.hasValue) _prefillAccounts(accountsAsync.value!);
     final active = currencies.where((c) => !c.deleted).toList();
     if (_currencyFrom == null && active.isNotEmpty) {
       _currencyFrom = active.first.code;
@@ -196,7 +217,7 @@ class _TransferEntryScreenState extends ConsumerState<TransferEntryScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('New transfer'),
+        title: Text(widget.existing != null ? 'Edit transfer' : 'New transfer'),
         actions: [
           TextButton.icon(
             onPressed: _saving ? null : _save,
